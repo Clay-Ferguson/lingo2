@@ -132,8 +132,9 @@ def get_input_devices():
 class AudioRecorder:
     """Handles continuous audio recording with silence detection."""
     
-    def __init__(self, on_speech_detected, audio_device=None):
+    def __init__(self, on_speech_detected, audio_device=None, on_processing_state_changed=None):
         self.on_speech_detected = on_speech_detected
+        self.on_processing_state_changed = on_processing_state_changed  # Callback for processing state
         self.audio_device = audio_device  # Device name or None for default
         self.is_running = False
         self.audio_buffer = []
@@ -284,6 +285,11 @@ class AudioRecorder:
         """Process recorded audio through whisper and type result."""
         duration_s = len(audio_data) / RECORD_SAMPLE_RATE
         log.info(f">>> SUBMITTING TO WHISPER: {len(audio_data)} samples ({duration_s:.2f}s of audio)")
+        
+        # Signal that processing has started (turn background orange)
+        if self.on_processing_state_changed:
+            GLib.idle_add(self.on_processing_state_changed, True)
+        
         try:
             text = transcribe_audio(audio_data)
             log.info(f">>> WHISPER RETURNED: '{text}'" if text else ">>> WHISPER RETURNED: (empty/None)")
@@ -297,6 +303,10 @@ class AudioRecorder:
         except Exception as e:
             # log.error(f"Transcription error: {e}", exc_info=True)
             pass
+        finally:
+            # Signal that processing has ended (restore background)
+            if self.on_processing_state_changed:
+                GLib.idle_add(self.on_processing_state_changed, False)
 
 
 def normalize_audio(audio_data):
@@ -1043,11 +1053,17 @@ class VoiceTyperWindow(Gtk.ApplicationWindow):
         self.mic_checkbox.connect("toggled", self.on_mic_toggled)
         vbox.append(self.mic_checkbox)
         
+        # Store reference to main container for processing state styling
+        self.main_container = vbox
+        
         # Add CSS for styling
         css_provider = Gtk.CssProvider()
         css_provider.load_from_data(b"""
             window {
                 background: @theme_bg_color;
+            }
+            window.processing {
+                background: #E67E22;
             }
             combobox {
                 font-size: 12px;
@@ -1130,7 +1146,11 @@ class VoiceTyperWindow(Gtk.ApplicationWindow):
             return
         
         audio_device = self.config.get('audio_device')
-        self.recorder = AudioRecorder(self.on_speech_detected, audio_device=audio_device)
+        self.recorder = AudioRecorder(
+            self.on_speech_detected,
+            audio_device=audio_device,
+            on_processing_state_changed=self.on_processing_state_changed
+        )
         success, error_msg = self.recorder.start()
         
         if not success:
@@ -1182,6 +1202,18 @@ class VoiceTyperWindow(Gtk.ApplicationWindow):
             self.recorder = None
         # log.info("Recording stopped.")
         print("🔇 Microphone OFF")
+    
+    def on_processing_state_changed(self, is_processing):
+        """Called when whisper processing state changes."""
+        if is_processing:
+            # Turn background orange while processing
+            self.add_css_class('processing')
+            log.debug("Processing started - background orange")
+        else:
+            # Restore default background
+            self.remove_css_class('processing')
+            log.debug("Processing complete - background restored")
+        return False  # Don't repeat (for GLib.idle_add)
     
     def on_speech_detected(self, text):
         """Called when speech is transcribed."""
