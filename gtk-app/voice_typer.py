@@ -66,9 +66,10 @@ DTYPE = np.int16
 # Silence detection
 # Lower threshold for quieter mics (0.001-0.005), higher for louder mics (0.01-0.02)
 # Adjust based on your microphone - check the "Audio RMS" log values when speaking
-SILENCE_THRESHOLD = 0.002  # RMS level below this is silence (lowered for quiet mics)
+SILENCE_THRESHOLD = 0.005  # RMS level below this is silence (raised to filter electrical spikes)
 SILENCE_DURATION_S = 1.0  # Seconds of silence before transcription
 MIN_AUDIO_DURATION_S = 0.5  # Minimum audio length to process
+SPEECH_CONFIRM_CHUNKS = 3  # Require this many consecutive above-threshold chunks to confirm speech
 
 # =============================================================================
 # Configuration Management
@@ -141,9 +142,9 @@ class AudioRecorder:
         self.silence_start_time = None
         self.recording_start_time = None
         self.speech_detected = False  # Track if we've heard speech above threshold
+        self.speech_confirm_count = 0  # Counter for consecutive above-threshold chunks
         self.stream = None
         self.lock = threading.Lock()
-        self.rms_log_counter = 0  # To avoid logging every single callback
     
     def start(self):
         """Start recording from microphone.
@@ -226,11 +227,10 @@ class AudioRecorder:
         audio_float = indata.astype(np.float32) / 32768.0
         rms = np.sqrt(np.mean(audio_float ** 2))
         
-        # Log RMS every ~50 callbacks (roughly once per second at 1024 blocksize @ 16kHz)
-        self.rms_log_counter += 1
-        if self.rms_log_counter >= 15:
-            # log.debug(f"Audio RMS: {rms:.6f} (threshold: {SILENCE_THRESHOLD}), buffer chunks: {len(self.audio_buffer)}, speech_detected: {self.speech_detected}")
-            self.rms_log_counter = 0
+        # Track peak RMS for diagnostics
+        if not hasattr(self, 'peak_rms'):
+            self.peak_rms = 0.0
+        self.peak_rms = max(self.peak_rms, rms)
         
         with self.lock:
             # Always accumulate audio
@@ -245,16 +245,17 @@ class AudioRecorder:
                 elif now - self.silence_start_time >= SILENCE_DURATION_S:
                     # We've had enough silence - process if we have audio AND speech was detected
                     audio_duration = now - self.recording_start_time
-                    # log.info(f"Silence detected! Buffer has {len(self.audio_buffer)} chunks, audio_duration={audio_duration:.2f}s, speech_detected={self.speech_detected}")
                     
                     if len(self.audio_buffer) > 0 and audio_duration >= MIN_AUDIO_DURATION_S and self.speech_detected:
                         # Grab the audio and reset
                         audio_data = np.concatenate(self.audio_buffer)
-                        # log.info(f"Triggering transcription with {len(audio_data)} samples ({len(audio_data)/RECORD_SAMPLE_RATE:.2f}s)")
+                        log.info(f">>> TRIGGERING WHISPER: {len(audio_data)} samples ({len(audio_data)/RECORD_SAMPLE_RATE:.2f}s), peak_rms={self.peak_rms:.6f}")
                         self.audio_buffer = []
                         self.recording_start_time = now
                         self.silence_start_time = None
                         self.speech_detected = False  # Reset for next utterance
+                        self.speech_confirm_count = 0  # Reset confirmation counter
+                        self.peak_rms = 0.0  # Reset peak for next utterance
                         
                         # Trigger transcription in separate thread
                         threading.Thread(
@@ -263,23 +264,22 @@ class AudioRecorder:
                             daemon=True
                         ).start()
                     else:
-                        # Not enough audio or no speech detected, just reset
-                        if not self.speech_detected:
-                            # log.debug("No speech detected in buffer, discarding silence")
-                            pass
-                        else:
-                            # log.debug(f"Not enough audio to process (duration={audio_duration:.2f}s < {MIN_AUDIO_DURATION_S}s)")
-                            pass
+                        # Not enough audio or no speech detected, just reset silently
                         self.audio_buffer = []
                         self.recording_start_time = now
                         self.silence_start_time = None
                         self.speech_detected = False
+                        self.speech_confirm_count = 0  # Reset confirmation counter
+                        self.peak_rms = 0.0  # Reset peak
             else:
-                # Above threshold - this is speech!
+                # Above threshold - might be speech, but require sustained signal
                 self.silence_start_time = None
-                if not self.speech_detected:
-                    log.info(f">>> VOICE DETECTED (RMS={rms:.4f} > threshold={SILENCE_THRESHOLD})")
-                self.speech_detected = True
+                self.speech_confirm_count += 1
+                
+                if not self.speech_detected and self.speech_confirm_count >= SPEECH_CONFIRM_CHUNKS:
+                    # Confirmed speech - multiple consecutive chunks above threshold
+                    log.info(f">>> VOICE CONFIRMED (RMS={rms:.6f} > threshold={SILENCE_THRESHOLD})")
+                    self.speech_detected = True
     
     def _process_audio(self, audio_data):
         """Process recorded audio through whisper and type result."""
