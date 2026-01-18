@@ -20,7 +20,6 @@ import numpy as np
 import sounddevice as sd
 import threading
 import subprocess
-import tempfile
 import wave
 import time
 import os
@@ -1086,6 +1085,29 @@ class VoiceTyperWindow(Gtk.ApplicationWindow):
         
         # Handle window close
         self.connect("close-request", self.on_close_request)
+        
+        # Auto-start microphone after window is fully shown
+        # Show orange background to indicate initialization in progress
+        GLib.idle_add(self._auto_start_microphone)
+    
+    def _auto_start_microphone(self):
+        """Auto-start the microphone when the application launches."""
+        # Show orange background to indicate we're initializing
+        self.add_css_class('processing')
+        
+        # Small delay to let the UI render the orange background first
+        GLib.timeout_add(100, self._complete_auto_start)
+        return False  # Don't repeat idle_add
+    
+    def _complete_auto_start(self):
+        """Complete the auto-start after showing the orange initialization indicator."""
+        # Check the mic checkbox (this triggers _activate_microphone via on_mic_toggled)
+        self.mic_checkbox.set_active(True)
+        
+        # Remove the initialization orange background
+        # (it will turn orange again if processing speech)
+        self.remove_css_class('processing')
+        return False  # Don't repeat timeout
     
     def _populate_mic_dropdown(self):
         """Populate the microphone dropdown with available input devices."""
@@ -1136,9 +1158,13 @@ class VoiceTyperWindow(Gtk.ApplicationWindow):
     def on_mic_toggled(self, checkbox):
         """Handle mic checkbox toggle."""
         if checkbox.get_active():
-            self.start_recording()
+            self._activate_microphone()
         else:
             self.stop_recording()
+    
+    def _activate_microphone(self):
+        """Activate the microphone - shared logic for startup and checkbox toggle."""
+        self.start_recording()
     
     def start_recording(self):
         """Start audio recording."""
