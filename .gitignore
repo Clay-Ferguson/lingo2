@@ -1,0 +1,27 @@
+# Whisper model and binaries (built by setup-whisper.sh)
+whisper-model/
+
+# Python virtual environment (created by run.sh)
+.venv/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Temp files
+*.tmp
+*.temp
+.DS_Store
+Thumbs.db
+
+# Editor/IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
