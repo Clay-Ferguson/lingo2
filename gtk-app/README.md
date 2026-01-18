@@ -139,6 +139,25 @@ sudo usermod -a -G audio $USER
 # Log out and back in
 ```
 
+### Microphone not working or wrong device selected
+
+If the microphone stops responding or behaves unexpectedly, check if:
+
+1. **Your selected microphone reverts to a different device** - If the GUI dropdown no longer shows your configured microphone as selected, this typically indicates another application has grabbed exclusive access to the device.
+
+2. **Audio is not being captured** - The app may appear to be listening but no transcription occurs.
+
+**Common causes:**
+- The **web-based Lingo app** (or another browser tab) is using the microphone
+- Another application (video call, screen recorder, etc.) has the microphone open
+
+**Solution:**
+1. Close any browser tabs running the web version of Lingo
+2. Close any other applications that might be using the microphone
+3. Restart this GTK application (`./run.sh`)
+
+Your microphone selection is saved to `~/.config/lingo-gtk.yaml` and will be restored on restart.
+
 ## Architecture
 
 ```
