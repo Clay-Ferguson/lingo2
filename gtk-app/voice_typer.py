@@ -401,6 +401,9 @@ def transcribe_audio(audio_data):
             while text and text[-1] in '.?!,;:':
                 text = text[:-1]
             text = text.strip()
+            # Lowercase the first letter (sentence fragments don't need caps)
+            if text and text[0].isupper():
+                text = text[0].lower() + text[1:]
             if text:
                 text = text + ' '  # Add space for smooth sentence flow
         
@@ -941,7 +944,7 @@ class VoiceTyperWindow(Gtk.ApplicationWindow):
         self.is_recording = False
         
         # Window setup - small dialog with title bar (draggable)
-        self.set_title("Voice Typer")
+        self.set_title("Lingo")
         self.set_default_size(150, -1)  # Minimal width, auto height
         self.set_resizable(False)
         

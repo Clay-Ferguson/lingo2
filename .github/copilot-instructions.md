@@ -1,75 +1,82 @@
 # Lingo 2.0 - AI Coding Instructions
 
 ## Project Overview
-Lingo 2.0 is a **framework-free** web app for text-to-speech (TTS) and speech-to-text (STT). The architecture is intentionally simple: vanilla HTML/CSS/JS frontend + Python FastAPI backend for local Whisper transcription. No React, Vue, or build systems.
+Lingo 2.0 provides **local speech-to-text** via whisper.cpp with two apps:
+1. **web-app/** - Browser-based TTS/STT with FastAPI backend (port 8009)
+2. **gtk-app/** - System-wide voice typing for Linux (types into any focused app)
+
+**Philosophy**: Framework-free. No React/Vue/build systems. Vanilla HTML/CSS/JS + Python.
 
 ## Architecture
 
-### Component Flow
 ```
-Browser (web-app/lingo.html/js/css)  <-->  FastAPI (web-app/whisper_server.py:8009)  <-->  whisper.cpp CLI
-                                           |
-                                     ffmpeg (audio conversion)
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ web-app (Browser)                    │ gtk-app (Linux Desktop)              │
+│ lingo.html/js/css                    │ voice_typer.py (GTK4)                │
+│     │                                │     │                                │
+│     ▼                                │     ▼                                │
+│ FastAPI (whisper_server.py:8009)     │ sounddevice → whisper-cli            │
+│     │                                │     │                                │
+│     └──────────┬─────────────────────┴─────┘                                │
+│                ▼                                                            │
+│          whisper-model/whisper.cpp/build/bin/whisper-cli                    │
+│          whisper-model/whisper.cpp/models/ggml-base.en.bin                  │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
-
-### Key Files
-- [web-app/lingo.js](web-app/lingo.js) - All frontend logic: TTS via Web Speech API, STT via MediaRecorder + silence detection
-- [web-app/whisper_server.py](web-app/whisper_server.py) - FastAPI server: `/transcribe` endpoint, static file serving
-- [setup-whisper.sh](setup-whisper.sh) - Builds whisper.cpp, downloads `base.en` model
-- [web-app/run.sh](web-app/run.sh) - Creates venv, installs deps, starts server on port 8009
-- [web-app/kill.sh](web-app/kill.sh) - Stops server by killing processes on port 8009
-
-### Data Flow (Speech-to-Text)
-1. Browser captures audio via `MediaRecorder` (webm/opus format)
-2. Silence detection (~1s threshold) triggers chunk submission
-3. Server converts webm → 16kHz mono WAV via ffmpeg
-4. `whisper-cli` transcribes, returns text via JSON
-5. Text inserted at cursor position in textarea
 
 ## Developer Commands
 
 ```bash
-./setup-whisper.sh   # First-time setup: builds whisper.cpp, downloads model
-cd web-app
-./run.sh             # Start server (auto-creates .venv, installs fastapi/uvicorn)
-./kill.sh            # Stop server
-```
+./setup-whisper.sh      # First-time: builds whisper.cpp, downloads base.en model
 
-Server runs at `http://localhost:8009/lingo.html`
+# Web app
+cd web-app && ./run.sh  # Start server → http://localhost:8009/lingo.html
+./kill.sh               # Stop server
+
+# GTK app (system-wide voice typing)
+cd gtk-app && ./run.sh  # Launch floating mic button
+```
 
 ## Code Conventions
 
-### Frontend (web-app/lingo.js)
-- **Section markers**: Code organized with `// ============` comment blocks (TTS State, STT State, Utility Functions, etc.)
-- **Button state management**: `updateReadButton()` and `updateMicButton()` sync UI with app state
-- **Storage keys**: Prefixed with `tts_` or pattern `*_v1` for localStorage versioning
-- **Status feedback**: All operations update `setStatus()` for user feedback
+### Web Frontend (web-app/lingo.js)
+- **Section markers**: `// ============` blocks organize code (TTS State, STT State, etc.)
+- **Button sync**: `updateReadButton()` / `updateMicButton()` keep UI in sync with state
+- **Storage keys**: `tts_` prefix or `*_v1` suffix for localStorage versioning
+- **Status bar**: All ops call `setStatus()` for user feedback
 
-### Backend (web-app/whisper_server.py)
-- **Paths**: Use `Path` from pathlib, all paths relative to `SCRIPT_DIR`
-- **Temp files**: UUID-prefixed in system temp dir, cleaned up in `finally` block
-- **Binary location**: `../whisper-model/whisper.cpp/build/bin/whisper-cli` (relative to web-app)
-- **Model location**: `../whisper-model/whisper.cpp/models/ggml-base.en.bin` (relative to web-app)
+### Python Backend (whisper_server.py, voice_typer.py)
+- **Paths**: Always use `Path` from pathlib, relative to `SCRIPT_DIR`
+- **Temp files**: UUID-prefixed, cleaned in `finally` block
+- **Whisper paths** (relative to each app):
+  - Binary: `../whisper-model/whisper.cpp/build/bin/whisper-cli`
+  - Model: `../whisper-model/whisper.cpp/models/ggml-base.en.bin`
 
-## Key Configuration
+### GTK App Specifics (gtk-app/voice_typer.py)
+- **Audio pipeline**: sounddevice (48kHz) → resample to 16kHz → normalize → whisper-cli
+- **Keyboard injection**: Uses XDG Remote Desktop Portal (Wayland-safe)
+- **Logging**: Writes to `gtk-app/voice_typer.log` (overwritten each run)
+- **Device selection**: Set `AUDIO_DEVICE = "Shure"` (or None for default)
 
-### Silence Detection (web-app/lingo.js:40-43)
-```javascript
-const SILENCE_THRESHOLD = 0.01;     // RMS level for silence
-const SILENCE_DURATION_MS = 1000;   // Silence before transcription trigger
-const MIN_AUDIO_DURATION_MS = 500;  // Skip very short clips
+## Silence Detection Config
+
+Both apps use similar silence detection (adjust for your mic):
+```python
+# gtk-app/voice_typer.py (quieter USB mics)
+SILENCE_THRESHOLD = 0.002   # RMS threshold
+SILENCE_DURATION_S = 1.0    # Seconds of silence → transcribe
+MIN_AUDIO_DURATION_S = 0.5  # Skip very short clips
+
+# web-app/lingo.js (browser)
+const SILENCE_THRESHOLD = 0.01;
+const SILENCE_DURATION_MS = 1000;
 ```
-
-### Whisper Settings (web-app/whisper_server.py:150-156)
-- Language: English only (`--language en`)
-- Threads: 4 (`--threads 4`)
-- No timestamps (`--no-timestamps`)
 
 ## Common Modifications
 
-**Change Whisper model**: Edit `WHISPER_MODEL` in web-app/whisper_server.py and model download in setup-whisper.sh
+**Change Whisper model**: Update `WHISPER_MODEL` in whisper_server.py AND voice_typer.py, plus model download in setup-whisper.sh
 
-**Add keyboard shortcut**: Follow pattern in web-app/lingo.js event handler (~line 640):
+**Add web keyboard shortcut** (web-app/lingo.js ~line 640):
 ```javascript
 if ((evt.ctrlKey || evt.metaKey) && evt.key.toLowerCase() === "x") {
   evt.preventDefault();
@@ -77,4 +84,17 @@ if ((evt.ctrlKey || evt.metaKey) && evt.key.toLowerCase() === "x") {
 }
 ```
 
-**Add API endpoint**: Add before the static files mount in web-app/whisper_server.py (line 208)
+**Add API endpoint**: Insert before static files mount in whisper_server.py (line ~208)
+
+**Tune for quiet mics**: Lower `SILENCE_THRESHOLD`, check RMS in gtk-app log
+
+## Dependencies
+
+**Shared** (both apps): `ffmpeg`, whisper.cpp (built via `./setup-whisper.sh`)
+
+**web-app**: `fastapi`, `uvicorn`, `python-multipart` (auto-installed by run.sh)
+
+**gtk-app** (run `./setup.sh` or manually install):
+- System: `python3-gi`, `gir1.2-gtk-4.0`, `portaudio19-dev` (Ubuntu/Debian names)
+- Python (via requirements.txt): `sounddevice`, `numpy`
+- Keyboard injection: Uses XDG Remote Desktop Portal (via GLib/Gio, included with PyGObject)

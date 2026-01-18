@@ -1,4 +1,4 @@
-# Voice Typer - GTK4 Desktop App 🎤
+# Lingo GTK: Voice Typer - GTK4 Desktop App 🎤
 
 A lightweight Linux desktop application that provides system-wide voice-to-text input. Speak naturally and your words appear wherever your cursor is focused - in any application!
 

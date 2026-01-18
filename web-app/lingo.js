@@ -510,8 +510,13 @@ async function sendToWhisper(audioBlob) {
     const data = await response.json();
     
     if (data.success && data.text && data.text.trim()) {
+      // Lowercase the first letter (sentence fragments don't need caps)
+      let text = data.text.trim();
+      if (text.length > 0 && text[0] === text[0].toUpperCase() && text[0] !== text[0].toLowerCase()) {
+        text = text[0].toLowerCase() + text.slice(1);
+      }
       // Insert the transcribed text at cursor position
-      insertTextAtCursor(data.text.trim() + ' ');
+      insertTextAtCursor(text + ' ');
       setStatus("Listening...");
     } else {
       // No text detected, just continue listening
