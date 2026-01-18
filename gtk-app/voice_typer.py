@@ -907,8 +907,8 @@ class KeyboardInjector:
             self._send_key(keysym, pressed=True)
             self._send_key(keysym, pressed=False)
             
-            # Schedule next character
-            GLib.timeout_add(10, type_char_at_index, index + 1)
+            # Schedule next character (1ms delay - minimal pause between keystrokes)
+            GLib.timeout_add(1, type_char_at_index, index + 1)
             return False  # Don't repeat this timeout
         
         # Start typing
