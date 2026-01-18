@@ -104,18 +104,20 @@ class AudioRecorder:
         device = None
         if AUDIO_DEVICE:
             devices = sd.query_devices()
-            log.debug(f"Searching for device containing '{AUDIO_DEVICE}' among {len(devices)} devices")
+            # log.debug(f"Searching for device containing '{AUDIO_DEVICE}' among {len(devices)} devices")
             for i, d in enumerate(devices):
                 if d['max_input_channels'] > 0:
-                    log.debug(f"  Input device [{i}]: {d['name']}")
+                    # log.debug(f"  Input device [{i}]: {d['name']}")
+                    pass
                 if AUDIO_DEVICE.lower() in d['name'].lower() and d['max_input_channels'] > 0:
                     device = i
-                    log.info(f"Found audio device: [{i}] {d['name']}")
+                    # log.info(f"Found audio device: [{i}] {d['name']}")
                     break
             if device is None:
-                log.warning(f"Device containing '{AUDIO_DEVICE}' not found, using default")
+                # log.warning(f"Device containing '{AUDIO_DEVICE}' not found, using default")
+                pass
         
-        log.info(f"Starting audio stream: {RECORD_SAMPLE_RATE}Hz, {CHANNELS} channel(s), device={device}")
+        # log.info(f"Starting audio stream: {RECORD_SAMPLE_RATE}Hz, {CHANNELS} channel(s), device={device}")
         
         self.stream = sd.InputStream(
             samplerate=RECORD_SAMPLE_RATE,
@@ -126,7 +128,7 @@ class AudioRecorder:
             device=device
         )
         self.stream.start()
-        log.info("Audio stream started successfully")
+        # log.info("Audio stream started successfully")
     
     def stop(self):
         """Stop recording."""
@@ -139,7 +141,8 @@ class AudioRecorder:
     def _audio_callback(self, indata, frames, time_info, status):
         """Called for each audio chunk from the microphone."""
         if status:
-            log.warning(f"Audio callback status: {status}")
+            # log.warning(f"Audio callback status: {status}")
+            pass
         
         if not self.is_running:
             return
@@ -152,7 +155,7 @@ class AudioRecorder:
         # Log RMS every ~50 callbacks (roughly once per second at 1024 blocksize @ 16kHz)
         self.rms_log_counter += 1
         if self.rms_log_counter >= 15:
-            log.debug(f"Audio RMS: {rms:.6f} (threshold: {SILENCE_THRESHOLD}), buffer chunks: {len(self.audio_buffer)}, speech_detected: {self.speech_detected}")
+            # log.debug(f"Audio RMS: {rms:.6f} (threshold: {SILENCE_THRESHOLD}), buffer chunks: {len(self.audio_buffer)}, speech_detected: {self.speech_detected}")
             self.rms_log_counter = 0
         
         with self.lock:
@@ -168,12 +171,12 @@ class AudioRecorder:
                 elif now - self.silence_start_time >= SILENCE_DURATION_S:
                     # We've had enough silence - process if we have audio AND speech was detected
                     audio_duration = now - self.recording_start_time
-                    log.info(f"Silence detected! Buffer has {len(self.audio_buffer)} chunks, audio_duration={audio_duration:.2f}s, speech_detected={self.speech_detected}")
+                    # log.info(f"Silence detected! Buffer has {len(self.audio_buffer)} chunks, audio_duration={audio_duration:.2f}s, speech_detected={self.speech_detected}")
                     
                     if len(self.audio_buffer) > 0 and audio_duration >= MIN_AUDIO_DURATION_S and self.speech_detected:
                         # Grab the audio and reset
                         audio_data = np.concatenate(self.audio_buffer)
-                        log.info(f"Triggering transcription with {len(audio_data)} samples ({len(audio_data)/RECORD_SAMPLE_RATE:.2f}s)")
+                        # log.info(f"Triggering transcription with {len(audio_data)} samples ({len(audio_data)/RECORD_SAMPLE_RATE:.2f}s)")
                         self.audio_buffer = []
                         self.recording_start_time = now
                         self.silence_start_time = None
@@ -188,9 +191,11 @@ class AudioRecorder:
                     else:
                         # Not enough audio or no speech detected, just reset
                         if not self.speech_detected:
-                            log.debug("No speech detected in buffer, discarding silence")
+                            # log.debug("No speech detected in buffer, discarding silence")
+                            pass
                         else:
-                            log.debug(f"Not enough audio to process (duration={audio_duration:.2f}s < {MIN_AUDIO_DURATION_S}s)")
+                            # log.debug(f"Not enough audio to process (duration={audio_duration:.2f}s < {MIN_AUDIO_DURATION_S}s)")
+                            pass
                         self.audio_buffer = []
                         self.recording_start_time = now
                         self.silence_start_time = None
@@ -202,18 +207,20 @@ class AudioRecorder:
     
     def _process_audio(self, audio_data):
         """Process recorded audio through whisper and type result."""
-        log.info(f"_process_audio called with {len(audio_data)} samples")
+        # log.info(f"_process_audio called with {len(audio_data)} samples")
         try:
             text = transcribe_audio(audio_data)
-            log.info(f"Transcription result: '{text}'")
+            # log.info(f"Transcription result: '{text}'")
             if text and text.strip():
-                log.info(f"Scheduling typing of: '{text.strip()}'")
+                # log.info(f"Scheduling typing of: '{text.strip()}'")
                 # Schedule callback on main thread
                 GLib.idle_add(self.on_speech_detected, text.strip())
             else:
-                log.warning("Transcription returned empty text")
+                # log.warning("Transcription returned empty text")
+                pass
         except Exception as e:
-            log.error(f"Transcription error: {e}", exc_info=True)
+            # log.error(f"Transcription error: {e}", exc_info=True)
+            pass
 
 
 def normalize_audio(audio_data):
@@ -235,7 +242,7 @@ def normalize_audio(audio_data):
     
     if peak < 100:
         # Audio is basically silent, don't amplify noise
-        log.debug(f"Audio too quiet to normalize (peak={peak})")
+        # log.debug(f"Audio too quiet to normalize (peak={peak})")
         return audio_data
     
     # Target peak at 80% of int16 max to avoid clipping
@@ -245,7 +252,7 @@ def normalize_audio(audio_data):
     # Limit gain to avoid amplifying quiet audio too much
     gain = min(gain, 20.0)  # Max 20x amplification
     
-    log.debug(f"Normalizing audio: peak={peak:.0f}, gain={gain:.2f}x")
+    # log.debug(f"Normalizing audio: peak={peak:.0f}, gain={gain:.2f}x")
     
     normalized = audio_float * gain
     
@@ -271,8 +278,8 @@ def resample_audio(audio_data, orig_rate, target_rate):
         audio_data = audio_data.flatten()
     
     # Debug: log audio data statistics
-    log.debug(f"Audio data before resample: dtype={audio_data.dtype}, shape={audio_data.shape}, "
-              f"min={audio_data.min()}, max={audio_data.max()}, mean={audio_data.mean():.2f}")
+    # log.debug(f"Audio data before resample: dtype={audio_data.dtype}, shape={audio_data.shape}, "
+    #           f"min={audio_data.min()}, max={audio_data.max()}, mean={audio_data.mean():.2f}")
     
     if orig_rate == target_rate:
         return audio_data
@@ -288,7 +295,7 @@ def resample_audio(audio_data, orig_rate, target_rate):
     resampled = np.interp(indices, np.arange(len(audio_data)), audio_data.astype(np.float32))
     
     # Debug: log resampled data statistics  
-    log.debug(f"Audio data after resample: min={resampled.min():.2f}, max={resampled.max():.2f}")
+    # log.debug(f"Audio data after resample: min={resampled.min():.2f}, max={resampled.max():.2f}")
     
     return resampled.astype(np.int16)
 
@@ -303,21 +310,21 @@ def transcribe_audio(audio_data):
     Returns:
         Transcribed text string
     """
-    log.info(f"transcribe_audio called with {len(audio_data)} samples at {RECORD_SAMPLE_RATE}Hz")
+    # log.info(f"transcribe_audio called with {len(audio_data)} samples at {RECORD_SAMPLE_RATE}Hz")
     
     if not WHISPER_BINARY.exists():
-        log.error(f"Whisper binary not found at {WHISPER_BINARY}")
+        # log.error(f"Whisper binary not found at {WHISPER_BINARY}")
         return None
     
     if not WHISPER_MODEL.exists():
-        log.error(f"Whisper model not found at {WHISPER_MODEL}")
+        # log.error(f"Whisper model not found at {WHISPER_MODEL}")
         return None
     
     # Resample from recording rate to whisper rate (48kHz -> 16kHz)
     if RECORD_SAMPLE_RATE != WHISPER_SAMPLE_RATE:
-        log.debug(f"Resampling from {RECORD_SAMPLE_RATE}Hz to {WHISPER_SAMPLE_RATE}Hz")
+        # log.debug(f"Resampling from {RECORD_SAMPLE_RATE}Hz to {WHISPER_SAMPLE_RATE}Hz")
         audio_data = resample_audio(audio_data, RECORD_SAMPLE_RATE, WHISPER_SAMPLE_RATE)
-        log.debug(f"Resampled to {len(audio_data)} samples")
+        # log.debug(f"Resampled to {len(audio_data)} samples")
     
     # Normalize audio to use more dynamic range (helps whisper with quiet audio)
     audio_data = normalize_audio(audio_data)
@@ -325,7 +332,7 @@ def transcribe_audio(audio_data):
     # Write audio to temporary WAV file (keep for debugging)
     wav_path = f"/tmp/voice_typer_debug.wav"
     
-    log.debug(f"Writing audio to file: {wav_path}")
+    # log.debug(f"Writing audio to file: {wav_path}")
     
     try:
         # Write WAV file at whisper's expected rate
@@ -335,7 +342,7 @@ def transcribe_audio(audio_data):
             wf.setframerate(WHISPER_SAMPLE_RATE)
             wf.writeframes(audio_data.tobytes())
         
-        log.info(f"WAV file written: {wav_path} ({os.path.getsize(wav_path)} bytes)")
+        # log.info(f"WAV file written: {wav_path} ({os.path.getsize(wav_path)} bytes)")
         
         # Run whisper.cpp with library path set
         env = os.environ.copy()
@@ -350,7 +357,7 @@ def transcribe_audio(audio_data):
             "--language", "en",
             "--threads", "4",
         ]
-        log.debug(f"Running whisper command: {' '.join(cmd)}")
+        # log.debug(f"Running whisper command: {' '.join(cmd)}")
         
         result = subprocess.run(
             cmd,
@@ -360,12 +367,12 @@ def transcribe_audio(audio_data):
             env=env
         )
         
-        log.debug(f"Whisper return code: {result.returncode}")
-        log.debug(f"Whisper stdout: {result.stdout[:500] if result.stdout else '(empty)'}")
-        log.debug(f"Whisper stderr: {result.stderr[:500] if result.stderr else '(empty)'}")
+        # log.debug(f"Whisper return code: {result.returncode}")
+        # log.debug(f"Whisper stdout: {result.stdout[:500] if result.stdout else '(empty)'}")
+        # log.debug(f"Whisper stderr: {result.stderr[:500] if result.stderr else '(empty)'}")
         
         if result.returncode != 0:
-            log.error(f"Whisper error (code {result.returncode}): {result.stderr}")
+            # log.error(f"Whisper error (code {result.returncode}): {result.stderr}")
             return None
         
         # Parse output - clean up whisper metadata
@@ -382,38 +389,16 @@ def transcribe_audio(audio_data):
         
         text = " ".join(clean_lines)
         
-        # Filter out common whisper hallucinations (appears when audio is mostly silence/noise)
-        hallucinations = [
-            "(dramatic music)",
-            "(upbeat music)", 
-            "(music)",
-            "(music playing)",
-            "(soft music)",
-            "(laughing)",
-            "(applause)",
-            "(silence)",
-            "(sighs)",
-            "(coughing)",
-            "(breathing)",
-            "[BLANK_AUDIO]",
-            "[silence]",
-            "Thank you.",
-            "Thanks for watching!",
-            "Thanks for watching.",
-            "Subscribe to my channel",
-            "Please subscribe",
-        ]
-        
-        text_lower = text.lower().strip()
-        for hallucination in hallucinations:
-            if text_lower == hallucination.lower():
-                log.warning(f"Filtered out whisper hallucination: '{text}'")
-                return None
+        # Filter out whisper hallucinations: if the first character is not alphanumeric,
+        # it's likely a hallucination like "(music)" or "[BLANK_AUDIO]" - ignore it
+        if text and not text[0].isalnum():
+            # log.warning(f"Filtered out likely hallucination (non-alphanumeric start): '{text}'")
+            return None
         
         return text
     
     except Exception as e:
-        log.error(f"Transcription exception: {e}", exc_info=True)
+        # log.error(f"Transcription exception: {e}", exc_info=True)
         return None
 
 
@@ -532,23 +517,23 @@ class KeyboardInjector:
             return
         
         if self._initializing:
-            log.debug("Already initializing keyboard injector")
+            # log.debug("Already initializing keyboard injector")
             return
         
         self._initializing = True
         self._init_callback = callback
         
-        log.info("Initializing Remote Desktop portal session...")
+        # log.info("Initializing Remote Desktop portal session...")
         
         try:
             self.connection = Gio.bus_get_sync(Gio.BusType.SESSION, None)
-            log.debug("Got DBus session connection")
+            # log.debug("Got DBus session connection")
             
             # Step 1: Create session
             self._create_session()
             
         except Exception as e:
-            log.error(f"Failed to initialize keyboard injector: {e}", exc_info=True)
+            # log.error(f"Failed to initialize keyboard injector: {e}", exc_info=True)
             self._initializing = False
             if callback:
                 callback(False)
@@ -558,7 +543,7 @@ class KeyboardInjector:
         token = self._generate_token()
         request_path = self._get_request_path(token)
         
-        log.debug(f"Creating session with token: {token}")
+        # log.debug(f"Creating session with token: {token}")
         
         # Subscribe to the Response signal before making the call
         self._signal_id = self.connection.signal_subscribe(
@@ -599,9 +584,9 @@ class KeyboardInjector:
         try:
             res = connection.call_finish(result)
             request_path = res.unpack()[0]
-            log.debug(f"CreateSession call returned request path: {request_path}")
+            # log.debug(f"CreateSession call returned request path: {request_path}")
         except Exception as e:
-            log.error(f"CreateSession call failed: {e}")
+            # log.error(f"CreateSession call failed: {e}")
             self._cleanup_signal()
             self._initializing = False
             if self._init_callback:
@@ -613,10 +598,10 @@ class KeyboardInjector:
         self._cleanup_signal()
         
         response, results = parameters.unpack()
-        log.debug(f"CreateSession response: {response}, results: {results}")
+        # log.debug(f"CreateSession response: {response}, results: {results}")
         
         if response != 0:
-            log.error(f"CreateSession failed with response code: {response}")
+            # log.error(f"CreateSession failed with response code: {response}")
             self._initializing = False
             if self._init_callback:
                 self._init_callback(False)
@@ -624,13 +609,13 @@ class KeyboardInjector:
         
         self.session_handle = results.get("session_handle", None)
         if not self.session_handle:
-            log.error("No session_handle in CreateSession response")
+            # log.error("No session_handle in CreateSession response")
             self._initializing = False
             if self._init_callback:
                 self._init_callback(False)
             return
         
-        log.info(f"Session created: {self.session_handle}")
+        # log.info(f"Session created: {self.session_handle}")
         
         # Step 2: Select devices (keyboard)
         self._select_devices()
@@ -640,7 +625,7 @@ class KeyboardInjector:
         token = self._generate_token()
         request_path = self._get_request_path(token)
         
-        log.debug("Selecting keyboard device...")
+        # log.debug("Selecting keyboard device...")
         
         # Subscribe to Response signal
         self._signal_id = self.connection.signal_subscribe(
@@ -681,9 +666,9 @@ class KeyboardInjector:
         """Called when SelectDevices DBus call completes."""
         try:
             res = connection.call_finish(result)
-            log.debug(f"SelectDevices call returned: {res.unpack()}")
+            # log.debug(f"SelectDevices call returned: {res.unpack()}")
         except Exception as e:
-            log.error(f"SelectDevices call failed: {e}")
+            # log.error(f"SelectDevices call failed: {e}")
             self._cleanup_signal()
             self._initializing = False
             if self._init_callback:
@@ -695,10 +680,10 @@ class KeyboardInjector:
         self._cleanup_signal()
         
         response, results = parameters.unpack()
-        log.debug(f"SelectDevices response: {response}")
+        # log.debug(f"SelectDevices response: {response}")
         
         if response != 0:
-            log.error(f"SelectDevices failed with response code: {response}")
+            # log.error(f"SelectDevices failed with response code: {response}")
             self._initializing = False
             if self._init_callback:
                 self._init_callback(False)
@@ -712,7 +697,7 @@ class KeyboardInjector:
         token = self._generate_token()
         request_path = self._get_request_path(token)
         
-        log.debug("Starting session (permission dialog may appear)...")
+        # log.debug("Starting session (permission dialog may appear)...")
         
         # Subscribe to Response signal
         self._signal_id = self.connection.signal_subscribe(
@@ -753,9 +738,9 @@ class KeyboardInjector:
         """Called when Start DBus call completes."""
         try:
             res = connection.call_finish(result)
-            log.debug(f"Start call returned: {res.unpack()}")
+            # log.debug(f"Start call returned: {res.unpack()}")
         except Exception as e:
-            log.error(f"Start call failed: {e}")
+            # log.error(f"Start call failed: {e}")
             self._cleanup_signal()
             self._initializing = False
             if self._init_callback:
@@ -767,20 +752,22 @@ class KeyboardInjector:
         self._cleanup_signal()
         
         response, results = parameters.unpack()
-        log.debug(f"Start session response: {response}, results: {results}")
+        # log.debug(f"Start session response: {response}, results: {results}")
         
         if response != 0:
             if response == 1:
-                log.warning("User cancelled the Remote Desktop permission dialog")
+                # log.warning("User cancelled the Remote Desktop permission dialog")
+                pass
             else:
-                log.error(f"Start session failed with response code: {response}")
+                # log.error(f"Start session failed with response code: {response}")
+                pass
             self._initializing = False
             self._initialized = False
             if self._init_callback:
                 self._init_callback(False)
             return
         
-        log.info("✅ Remote Desktop session started successfully!")
+        # log.info("✅ Remote Desktop session started successfully!")
         self._initialized = True
         self._initializing = False
         
@@ -807,18 +794,18 @@ class KeyboardInjector:
             text: The string to type
         """
         if not self._initialized:
-            log.warning("Keyboard injector not initialized, queuing text")
+            # log.warning("Keyboard injector not initialized, queuing text")
             self.pending_text = text
             if not self._initializing:
                 self.initialize()
             return
         
-        log.info(f"Typing text: '{text}'")
+        # log.info(f"Typing text: '{text}'")
         
         # Type each character with a small delay
         def type_char_at_index(index):
             if index >= len(text):
-                log.debug("Finished typing text")
+                # log.debug("Finished typing text")
                 return False  # Stop the timeout
             
             char = text[index]
@@ -827,7 +814,7 @@ class KeyboardInjector:
             if keysym is None:
                 # Try Unicode keysym for unsupported characters
                 keysym = 0x01000000 | ord(char)
-                log.debug(f"Using Unicode keysym for '{char}': {hex(keysym)}")
+                # log.debug(f"Using Unicode keysym for '{char}': {hex(keysym)}")
             
             self._send_key(keysym, pressed=True)
             self._send_key(keysym, pressed=False)
@@ -848,7 +835,7 @@ class KeyboardInjector:
             pressed: True for key down, False for key up
         """
         if not self.session_handle:
-            log.error("No session handle, cannot send key")
+            # log.error("No session handle, cannot send key")
             return
         
         state = 1 if pressed else 0
@@ -873,7 +860,8 @@ class KeyboardInjector:
                 None
             )
         except Exception as e:
-            log.error(f"Failed to send key {hex(keysym)} (pressed={pressed}): {e}")
+            # log.error(f"Failed to send key {hex(keysym)} (pressed={pressed}): {e}")
+            pass
     
     def close(self):
         """Close the Remote Desktop session."""
@@ -891,9 +879,10 @@ class KeyboardInjector:
                     -1,
                     None
                 )
-                log.info("Remote Desktop session closed")
+                # log.info("Remote Desktop session closed")
             except Exception as e:
-                log.debug(f"Error closing session (may already be closed): {e}")
+                # log.debug(f"Error closing session (may already be closed): {e}")
+                pass
         
         self._cleanup_signal()
         self.session_handle = None
@@ -922,7 +911,7 @@ def type_text(text):
     Args:
         text: The string to type
     """
-    log.info(f"TRANSCRIBED: '{text}'")
+    # log.info(f"TRANSCRIBED: '{text}'")
     print(f"\n🎯 TRANSCRIBED: {text}\n")
     
     injector = get_keyboard_injector()
@@ -999,22 +988,22 @@ class VoiceTyperWindow(Gtk.ApplicationWindow):
         self.is_recording = True
         self.recorder = AudioRecorder(self.on_speech_detected)
         self.recorder.start()
-        log.info("Recording started...")
+        # log.info("Recording started...")
         print("🎤 Microphone ON - listening...")
         
         # Initialize keyboard injector (triggers permission dialog on first use)
         injector = get_keyboard_injector()
         if not injector._initialized and not injector._initializing:
-            log.info("Initializing keyboard injector for first use...")
+            # log.info("Initializing keyboard injector for first use...")
             injector.initialize(callback=self._on_keyboard_ready)
     
     def _on_keyboard_ready(self, success):
         """Called when keyboard injector initialization completes."""
         if success:
-            log.info("✅ Keyboard injector ready - transcribed text will be typed")
+            # log.info("✅ Keyboard injector ready - transcribed text will be typed")
             print("⌨️  Keyboard access granted - ready to type!")
         else:
-            log.warning("❌ Keyboard injector failed - text will only be logged")
+            # log.warning("❌ Keyboard injector failed - text will only be logged")
             print("⚠️  Keyboard access denied - text will be logged but not typed")
     
     def stop_recording(self):
@@ -1026,12 +1015,12 @@ class VoiceTyperWindow(Gtk.ApplicationWindow):
         if self.recorder:
             self.recorder.stop()
             self.recorder = None
-        log.info("Recording stopped.")
+        # log.info("Recording stopped.")
         print("🔇 Microphone OFF")
     
     def on_speech_detected(self, text):
         """Called when speech is transcribed."""
-        log.info(f"on_speech_detected callback called with: '{text}'")
+        # log.info(f"on_speech_detected callback called with: '{text}'")
         type_text(text)
         return False  # Don't repeat
     
