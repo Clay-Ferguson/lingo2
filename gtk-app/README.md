@@ -108,9 +108,24 @@ pactl list sources short
 
 ### Keyboard typing not working (Wayland)
 
-On Wayland, `pynput` may have limited functionality. Options:
-1. Use X11 session instead
-2. Install `ydotool` as an alternative
+This app uses the **XDG Remote Desktop Portal** for keyboard input on Wayland. On first use:
+
+1. A system dialog will appear: *"Allow Voice Typer to remote control your desktop?"*
+2. Click **Allow** to grant keyboard access
+3. This permission persists until you close the app
+
+If the permission dialog doesn't appear or typing still doesn't work:
+
+```bash
+# Check that xdg-desktop-portal is running
+systemctl --user status xdg-desktop-portal
+
+# Restart it if needed
+systemctl --user restart xdg-desktop-portal
+systemctl --user restart xdg-desktop-portal-gnome  # or -gtk, -kde, etc.
+```
+
+**Note:** If you deny the permission, transcribed text will still be logged to the console but won't be typed.
 
 ### Window doesn't appear in corner (Wayland)
 

@@ -13,5 +13,5 @@ sounddevice>=0.4.6
 # Numerical processing for RMS calculation
 numpy>=1.21.0
 
-# Keyboard simulation for typing transcribed text
-pynput>=1.7.6
+# Note: Keyboard injection uses the XDG Remote Desktop Portal (via GLib/Gio)
+# which is included with PyGObject - no additional packages needed

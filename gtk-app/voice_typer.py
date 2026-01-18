@@ -68,8 +68,9 @@ DTYPE = np.int16
 AUDIO_DEVICE = "Shure"  # Shure MV5C USB microphone
 
 # Silence detection
-# Lower threshold for quieter mics (0.005-0.01), higher for louder mics (0.01-0.02)
-SILENCE_THRESHOLD = 0.01  # RMS level below this is silence
+# Lower threshold for quieter mics (0.001-0.005), higher for louder mics (0.01-0.02)
+# Adjust based on your microphone - check the "Audio RMS" log values when speaking
+SILENCE_THRESHOLD = 0.002  # RMS level below this is silence (lowered for quiet mics)
 SILENCE_DURATION_S = 1.0  # Seconds of silence before transcription
 MIN_AUDIO_DURATION_S = 0.5  # Minimum audio length to process
 
@@ -417,18 +418,515 @@ def transcribe_audio(audio_data):
 
 
 # =============================================================================
-# Keyboard Injection
+# Keyboard Injection via XDG Remote Desktop Portal (Wayland)
 # =============================================================================
+
+# Character to X11 Keysym mapping
+# See: https://www.cl.cam.ac.uk/~mgk25/ucs/keysyms.txt
+CHAR_TO_KEYSYM = {
+    # Lowercase letters (XK_a - XK_z)
+    'a': 0x0061, 'b': 0x0062, 'c': 0x0063, 'd': 0x0064, 'e': 0x0065,
+    'f': 0x0066, 'g': 0x0067, 'h': 0x0068, 'i': 0x0069, 'j': 0x006a,
+    'k': 0x006b, 'l': 0x006c, 'm': 0x006d, 'n': 0x006e, 'o': 0x006f,
+    'p': 0x0070, 'q': 0x0071, 'r': 0x0072, 's': 0x0073, 't': 0x0074,
+    'u': 0x0075, 'v': 0x0076, 'w': 0x0077, 'x': 0x0078, 'y': 0x0079,
+    'z': 0x007a,
+    
+    # Uppercase letters (XK_A - XK_Z)
+    'A': 0x0041, 'B': 0x0042, 'C': 0x0043, 'D': 0x0044, 'E': 0x0045,
+    'F': 0x0046, 'G': 0x0047, 'H': 0x0048, 'I': 0x0049, 'J': 0x004a,
+    'K': 0x004b, 'L': 0x004c, 'M': 0x004d, 'N': 0x004e, 'O': 0x004f,
+    'P': 0x0050, 'Q': 0x0051, 'R': 0x0052, 'S': 0x0053, 'T': 0x0054,
+    'U': 0x0055, 'V': 0x0056, 'W': 0x0057, 'X': 0x0058, 'Y': 0x0059,
+    'Z': 0x005a,
+    
+    # Numbers (XK_0 - XK_9)
+    '0': 0x0030, '1': 0x0031, '2': 0x0032, '3': 0x0033, '4': 0x0034,
+    '5': 0x0035, '6': 0x0036, '7': 0x0037, '8': 0x0038, '9': 0x0039,
+    
+    # Common punctuation and symbols
+    ' ': 0x0020,   # space
+    '!': 0x0021,   # exclam
+    '"': 0x0022,   # quotedbl
+    '#': 0x0023,   # numbersign
+    '$': 0x0024,   # dollar
+    '%': 0x0025,   # percent
+    '&': 0x0026,   # ampersand
+    "'": 0x0027,   # apostrophe
+    '(': 0x0028,   # parenleft
+    ')': 0x0029,   # parenright
+    '*': 0x002a,   # asterisk
+    '+': 0x002b,   # plus
+    ',': 0x002c,   # comma
+    '-': 0x002d,   # minus
+    '.': 0x002e,   # period
+    '/': 0x002f,   # slash
+    ':': 0x003a,   # colon
+    ';': 0x003b,   # semicolon
+    '<': 0x003c,   # less
+    '=': 0x003d,   # equal
+    '>': 0x003e,   # greater
+    '?': 0x003f,   # question
+    '@': 0x0040,   # at
+    '[': 0x005b,   # bracketleft
+    '\\': 0x005c,  # backslash
+    ']': 0x005d,   # bracketright
+    '^': 0x005e,   # asciicircum
+    '_': 0x005f,   # underscore
+    '`': 0x0060,   # grave
+    '{': 0x007b,   # braceleft
+    '|': 0x007c,   # bar
+    '}': 0x007d,   # braceright
+    '~': 0x007e,   # asciitilde
+    '\n': 0xff0d,  # Return key
+    '\t': 0xff09,  # Tab key
+}
+
+# DBus Portal constants
+BUS_NAME = "org.freedesktop.portal.Desktop"
+OBJ_PATH = "/org/freedesktop/portal/desktop"
+REMOTE_DESKTOP_IFACE = "org.freedesktop.portal.RemoteDesktop"
+REQUEST_IFACE = "org.freedesktop.portal.Request"
+
+from gi.repository import Gio, GLib
+import random
+import string
+
+
+class KeyboardInjector:
+    """
+    Handles keyboard injection via the XDG Remote Desktop Portal.
+    
+    This allows Wayland applications to simulate keyboard input without
+    requiring root permissions or X11.
+    """
+    
+    def __init__(self):
+        self.connection = None
+        self.session_handle = None
+        self.pending_text = None
+        self._signal_id = None
+        self._initializing = False
+        self._initialized = False
+    
+    def _generate_token(self):
+        """Generate a unique token for portal requests."""
+        return 'voicetyper_' + ''.join(random.choices(string.ascii_lowercase + string.digits, k=16))
+    
+    def _get_request_path(self, token):
+        """Get the DBus request object path for a given token."""
+        sender = self.connection.get_unique_name().replace('.', '_').replace(':', '')
+        return f"/org/freedesktop/portal/desktop/request/{sender}/{token}"
+    
+    def initialize(self, callback=None):
+        """
+        Initialize the Remote Desktop portal session.
+        This will trigger a system permission dialog on first use.
+        
+        Args:
+            callback: Optional callback(success: bool) when initialization completes
+        """
+        if self._initialized:
+            if callback:
+                callback(True)
+            return
+        
+        if self._initializing:
+            log.debug("Already initializing keyboard injector")
+            return
+        
+        self._initializing = True
+        self._init_callback = callback
+        
+        log.info("Initializing Remote Desktop portal session...")
+        
+        try:
+            self.connection = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+            log.debug("Got DBus session connection")
+            
+            # Step 1: Create session
+            self._create_session()
+            
+        except Exception as e:
+            log.error(f"Failed to initialize keyboard injector: {e}", exc_info=True)
+            self._initializing = False
+            if callback:
+                callback(False)
+    
+    def _create_session(self):
+        """Create a Remote Desktop session."""
+        token = self._generate_token()
+        request_path = self._get_request_path(token)
+        
+        log.debug(f"Creating session with token: {token}")
+        
+        # Subscribe to the Response signal before making the call
+        self._signal_id = self.connection.signal_subscribe(
+            BUS_NAME,
+            REQUEST_IFACE,
+            "Response",
+            request_path,
+            None,
+            Gio.DBusSignalFlags.NO_MATCH_RULE,
+            self._on_create_session_response,
+            None
+        )
+        
+        # Call CreateSession
+        # Build the options dict for the variant
+        session_token = self._generate_token()
+        params = GLib.Variant("(a{sv})", ({
+            "handle_token": GLib.Variant("s", token),
+            "session_handle_token": GLib.Variant("s", session_token),
+        },))
+        
+        self.connection.call(
+            BUS_NAME,
+            OBJ_PATH,
+            REMOTE_DESKTOP_IFACE,
+            "CreateSession",
+            params,
+            GLib.VariantType("(o)"),
+            Gio.DBusCallFlags.NONE,
+            -1,
+            None,
+            self._on_create_session_call_done,
+            None
+        )
+    
+    def _on_create_session_call_done(self, connection, result, user_data):
+        """Called when CreateSession DBus call completes."""
+        try:
+            res = connection.call_finish(result)
+            request_path = res.unpack()[0]
+            log.debug(f"CreateSession call returned request path: {request_path}")
+        except Exception as e:
+            log.error(f"CreateSession call failed: {e}")
+            self._cleanup_signal()
+            self._initializing = False
+            if self._init_callback:
+                self._init_callback(False)
+    
+    def _on_create_session_response(self, connection, sender_name, object_path, 
+                                     interface_name, signal_name, parameters, user_data):
+        """Handle the Response signal from CreateSession."""
+        self._cleanup_signal()
+        
+        response, results = parameters.unpack()
+        log.debug(f"CreateSession response: {response}, results: {results}")
+        
+        if response != 0:
+            log.error(f"CreateSession failed with response code: {response}")
+            self._initializing = False
+            if self._init_callback:
+                self._init_callback(False)
+            return
+        
+        self.session_handle = results.get("session_handle", None)
+        if not self.session_handle:
+            log.error("No session_handle in CreateSession response")
+            self._initializing = False
+            if self._init_callback:
+                self._init_callback(False)
+            return
+        
+        log.info(f"Session created: {self.session_handle}")
+        
+        # Step 2: Select devices (keyboard)
+        self._select_devices()
+    
+    def _select_devices(self):
+        """Select keyboard device for the session."""
+        token = self._generate_token()
+        request_path = self._get_request_path(token)
+        
+        log.debug("Selecting keyboard device...")
+        
+        # Subscribe to Response signal
+        self._signal_id = self.connection.signal_subscribe(
+            BUS_NAME,
+            REQUEST_IFACE,
+            "Response",
+            request_path,
+            None,
+            Gio.DBusSignalFlags.NO_MATCH_RULE,
+            self._on_select_devices_response,
+            None
+        )
+        
+        # types: 1=keyboard, 2=pointer, 3=both
+        params = GLib.Variant("(oa{sv})", (
+            self.session_handle,
+            {
+                "handle_token": GLib.Variant("s", token),
+                "types": GLib.Variant("u", 1),  # Keyboard only
+            }
+        ))
+        
+        self.connection.call(
+            BUS_NAME,
+            OBJ_PATH,
+            REMOTE_DESKTOP_IFACE,
+            "SelectDevices",
+            params,
+            GLib.VariantType("(o)"),
+            Gio.DBusCallFlags.NONE,
+            -1,
+            None,
+            self._on_select_devices_call_done,
+            None
+        )
+    
+    def _on_select_devices_call_done(self, connection, result, user_data):
+        """Called when SelectDevices DBus call completes."""
+        try:
+            res = connection.call_finish(result)
+            log.debug(f"SelectDevices call returned: {res.unpack()}")
+        except Exception as e:
+            log.error(f"SelectDevices call failed: {e}")
+            self._cleanup_signal()
+            self._initializing = False
+            if self._init_callback:
+                self._init_callback(False)
+    
+    def _on_select_devices_response(self, connection, sender_name, object_path,
+                                     interface_name, signal_name, parameters, user_data):
+        """Handle the Response signal from SelectDevices."""
+        self._cleanup_signal()
+        
+        response, results = parameters.unpack()
+        log.debug(f"SelectDevices response: {response}")
+        
+        if response != 0:
+            log.error(f"SelectDevices failed with response code: {response}")
+            self._initializing = False
+            if self._init_callback:
+                self._init_callback(False)
+            return
+        
+        # Step 3: Start the session
+        self._start_session()
+    
+    def _start_session(self):
+        """Start the Remote Desktop session - this triggers the permission dialog."""
+        token = self._generate_token()
+        request_path = self._get_request_path(token)
+        
+        log.debug("Starting session (permission dialog may appear)...")
+        
+        # Subscribe to Response signal
+        self._signal_id = self.connection.signal_subscribe(
+            BUS_NAME,
+            REQUEST_IFACE,
+            "Response",
+            request_path,
+            None,
+            Gio.DBusSignalFlags.NO_MATCH_RULE,
+            self._on_start_session_response,
+            None
+        )
+        
+        # parent_window is empty string for no parent
+        params = GLib.Variant("(osa{sv})", (
+            self.session_handle,
+            "",
+            {
+                "handle_token": GLib.Variant("s", token),
+            }
+        ))
+        
+        self.connection.call(
+            BUS_NAME,
+            OBJ_PATH,
+            REMOTE_DESKTOP_IFACE,
+            "Start",
+            params,
+            GLib.VariantType("(o)"),
+            Gio.DBusCallFlags.NONE,
+            -1,
+            None,
+            self._on_start_session_call_done,
+            None
+        )
+    
+    def _on_start_session_call_done(self, connection, result, user_data):
+        """Called when Start DBus call completes."""
+        try:
+            res = connection.call_finish(result)
+            log.debug(f"Start call returned: {res.unpack()}")
+        except Exception as e:
+            log.error(f"Start call failed: {e}")
+            self._cleanup_signal()
+            self._initializing = False
+            if self._init_callback:
+                self._init_callback(False)
+    
+    def _on_start_session_response(self, connection, sender_name, object_path,
+                                    interface_name, signal_name, parameters, user_data):
+        """Handle the Response signal from Start."""
+        self._cleanup_signal()
+        
+        response, results = parameters.unpack()
+        log.debug(f"Start session response: {response}, results: {results}")
+        
+        if response != 0:
+            if response == 1:
+                log.warning("User cancelled the Remote Desktop permission dialog")
+            else:
+                log.error(f"Start session failed with response code: {response}")
+            self._initializing = False
+            self._initialized = False
+            if self._init_callback:
+                self._init_callback(False)
+            return
+        
+        log.info("✅ Remote Desktop session started successfully!")
+        self._initialized = True
+        self._initializing = False
+        
+        if self._init_callback:
+            self._init_callback(True)
+        
+        # If there was pending text, type it now
+        if self.pending_text:
+            text = self.pending_text
+            self.pending_text = None
+            self.type_text(text)
+    
+    def _cleanup_signal(self):
+        """Unsubscribe from current signal."""
+        if self._signal_id and self.connection:
+            self.connection.signal_unsubscribe(self._signal_id)
+            self._signal_id = None
+    
+    def type_text(self, text):
+        """
+        Type the given text by simulating keyboard input.
+        
+        Args:
+            text: The string to type
+        """
+        if not self._initialized:
+            log.warning("Keyboard injector not initialized, queuing text")
+            self.pending_text = text
+            if not self._initializing:
+                self.initialize()
+            return
+        
+        log.info(f"Typing text: '{text}'")
+        
+        # Type each character with a small delay
+        def type_char_at_index(index):
+            if index >= len(text):
+                log.debug("Finished typing text")
+                return False  # Stop the timeout
+            
+            char = text[index]
+            keysym = CHAR_TO_KEYSYM.get(char)
+            
+            if keysym is None:
+                # Try Unicode keysym for unsupported characters
+                keysym = 0x01000000 | ord(char)
+                log.debug(f"Using Unicode keysym for '{char}': {hex(keysym)}")
+            
+            self._send_key(keysym, pressed=True)
+            self._send_key(keysym, pressed=False)
+            
+            # Schedule next character
+            GLib.timeout_add(10, type_char_at_index, index + 1)
+            return False  # Don't repeat this timeout
+        
+        # Start typing
+        GLib.idle_add(type_char_at_index, 0)
+    
+    def _send_key(self, keysym, pressed):
+        """
+        Send a single key event via the Remote Desktop portal.
+        
+        Args:
+            keysym: The X11 keysym to send
+            pressed: True for key down, False for key up
+        """
+        if not self.session_handle:
+            log.error("No session handle, cannot send key")
+            return
+        
+        state = 1 if pressed else 0
+        
+        try:
+            # NotifyKeyboardKeysym(session_handle, options, keysym, state)
+            # keysym is signed int (i), state is unsigned int (u)
+            self.connection.call_sync(
+                BUS_NAME,
+                OBJ_PATH,
+                REMOTE_DESKTOP_IFACE,
+                "NotifyKeyboardKeysym",
+                GLib.Variant("(oa{sv}iu)", (
+                    self.session_handle,
+                    {},  # options (empty)
+                    keysym,
+                    state
+                )),
+                None,
+                Gio.DBusCallFlags.NONE,
+                -1,
+                None
+            )
+        except Exception as e:
+            log.error(f"Failed to send key {hex(keysym)} (pressed={pressed}): {e}")
+    
+    def close(self):
+        """Close the Remote Desktop session."""
+        if self.session_handle and self.connection:
+            try:
+                # Close the session
+                self.connection.call_sync(
+                    BUS_NAME,
+                    self.session_handle,
+                    "org.freedesktop.portal.Session",
+                    "Close",
+                    None,
+                    None,
+                    Gio.DBusCallFlags.NONE,
+                    -1,
+                    None
+                )
+                log.info("Remote Desktop session closed")
+            except Exception as e:
+                log.debug(f"Error closing session (may already be closed): {e}")
+        
+        self._cleanup_signal()
+        self.session_handle = None
+        self._initialized = False
+
+
+# Global keyboard injector instance
+_keyboard_injector = None
+
+
+def get_keyboard_injector():
+    """Get or create the global keyboard injector instance."""
+    global _keyboard_injector
+    if _keyboard_injector is None:
+        _keyboard_injector = KeyboardInjector()
+    return _keyboard_injector
+
 
 def type_text(text):
     """
-    Handle transcribed text.
+    Type text by simulating keyboard input via XDG Remote Desktop Portal.
     
-    TODO: Implement clipboard paste functionality.
-    For now, just logs the transcribed text.
+    This is the main entry point for typing transcribed text.
+    On first call, it will trigger a system permission dialog.
+    
+    Args:
+        text: The string to type
     """
     log.info(f"TRANSCRIBED: '{text}'")
     print(f"\n🎯 TRANSCRIBED: {text}\n")
+    
+    injector = get_keyboard_injector()
+    injector.type_text(text)
 
 
 # =============================================================================
@@ -503,6 +1001,21 @@ class VoiceTyperWindow(Gtk.ApplicationWindow):
         self.recorder.start()
         log.info("Recording started...")
         print("🎤 Microphone ON - listening...")
+        
+        # Initialize keyboard injector (triggers permission dialog on first use)
+        injector = get_keyboard_injector()
+        if not injector._initialized and not injector._initializing:
+            log.info("Initializing keyboard injector for first use...")
+            injector.initialize(callback=self._on_keyboard_ready)
+    
+    def _on_keyboard_ready(self, success):
+        """Called when keyboard injector initialization completes."""
+        if success:
+            log.info("✅ Keyboard injector ready - transcribed text will be typed")
+            print("⌨️  Keyboard access granted - ready to type!")
+        else:
+            log.warning("❌ Keyboard injector failed - text will only be logged")
+            print("⚠️  Keyboard access denied - text will be logged but not typed")
     
     def stop_recording(self):
         """Stop audio recording."""
@@ -525,6 +1038,13 @@ class VoiceTyperWindow(Gtk.ApplicationWindow):
     def on_close_request(self, window):
         """Clean up when window closes."""
         self.stop_recording()
+        
+        # Clean up keyboard injector
+        global _keyboard_injector
+        if _keyboard_injector:
+            _keyboard_injector.close()
+            _keyboard_injector = None
+        
         return False  # Allow close
 
 
