@@ -1047,8 +1047,8 @@ class VoiceTyperWindow(Gtk.ApplicationWindow):
         self.mic_dropdown.connect("changed", self.on_mic_changed)
         vbox.append(self.mic_dropdown)
         
-        # Create "Mic" checkbox
-        self.mic_checkbox = Gtk.CheckButton(label="Mic")
+        # Create "Microphone" checkbox
+        self.mic_checkbox = Gtk.CheckButton(label="Microphone")
         self.mic_checkbox.connect("toggled", self.on_mic_toggled)
         vbox.append(self.mic_checkbox)
         
@@ -1068,7 +1068,12 @@ class VoiceTyperWindow(Gtk.ApplicationWindow):
                 font-size: 12px;
             }
             checkbutton {
-                font-size: 14px;
+                font-size: 20px;
+                margin-top: 5px;
+            }
+            checkbutton check {
+                min-width: 24px;
+                min-height: 24px;
             }
             checkbutton:checked label {
                 color: #e53935;
