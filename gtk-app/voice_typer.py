@@ -145,7 +145,11 @@ class AudioRecorder:
         self.rms_log_counter = 0  # To avoid logging every single callback
     
     def start(self):
-        """Start recording from microphone."""
+        """Start recording from microphone.
+        
+        Returns:
+            tuple: (success: bool, error_message: str or None)
+        """
         self.is_running = True
         self.audio_buffer = []
         self.silence_start_time = None
@@ -154,7 +158,12 @@ class AudioRecorder:
         
         # Find the audio device by name
         device = None
+        device_not_found = False
         if self.audio_device:
+            # Force PortAudio to re-scan devices
+            sd._terminate()
+            sd._initialize()
+            
             devices = sd.query_devices()
             for i, d in enumerate(devices):
                 if d['name'] == self.audio_device and d['max_input_channels'] > 0:
@@ -162,20 +171,37 @@ class AudioRecorder:
                     log.info(f"Using audio device: [{i}] {d['name']}")
                     break
             if device is None:
-                log.warning(f"Device '{self.audio_device}' not found, using default")
+                log.warning(f"Device '{self.audio_device}' not found in available devices")
+                device_not_found = True
+                # List what we did find for debugging
+                available = [d['name'] for d in devices if d['max_input_channels'] > 0]
+                log.info(f"Available input devices: {available}")
+                return (False, f"Microphone '{self.audio_device}' not found.\n\nIt may be in use by another application (like Chrome).\n\nTry closing other apps that use the microphone and try again.")
         
         log.info(f"Starting audio stream: {RECORD_SAMPLE_RATE}Hz, {CHANNELS} channel(s), device={device}")
         
-        self.stream = sd.InputStream(
-            samplerate=RECORD_SAMPLE_RATE,
-            channels=CHANNELS,
-            dtype=DTYPE,
-            callback=self._audio_callback,
-            blocksize=1024,
-            device=device
-        )
-        self.stream.start()
-        # log.info("Audio stream started successfully")
+        try:
+            self.stream = sd.InputStream(
+                samplerate=RECORD_SAMPLE_RATE,
+                channels=CHANNELS,
+                dtype=DTYPE,
+                callback=self._audio_callback,
+                blocksize=1024,
+                device=device
+            )
+            self.stream.start()
+            log.info("Audio stream started successfully")
+            return (True, None)
+        except sd.PortAudioError as e:
+            error_msg = str(e)
+            log.error(f"Failed to open audio stream: {error_msg}")
+            self.is_running = False
+            return (False, f"Failed to open microphone.\n\nError: {error_msg}\n\nThe device may be in use by another application.")
+        except Exception as e:
+            error_msg = str(e)
+            log.error(f"Unexpected error opening audio stream: {error_msg}")
+            self.is_running = False
+            return (False, f"Unexpected error opening microphone:\n\n{error_msg}")
     
     def stop(self):
         """Stop recording."""
@@ -250,14 +276,17 @@ class AudioRecorder:
             else:
                 # Above threshold - this is speech!
                 self.silence_start_time = None
+                if not self.speech_detected:
+                    log.info(f">>> VOICE DETECTED (RMS={rms:.4f} > threshold={SILENCE_THRESHOLD})")
                 self.speech_detected = True
     
     def _process_audio(self, audio_data):
         """Process recorded audio through whisper and type result."""
-        # log.info(f"_process_audio called with {len(audio_data)} samples")
+        duration_s = len(audio_data) / RECORD_SAMPLE_RATE
+        log.info(f">>> SUBMITTING TO WHISPER: {len(audio_data)} samples ({duration_s:.2f}s of audio)")
         try:
             text = transcribe_audio(audio_data)
-            # log.info(f"Transcription result: '{text}'")
+            log.info(f">>> WHISPER RETURNED: '{text}'" if text else ">>> WHISPER RETURNED: (empty/None)")
             if text and text.strip():
                 # log.info(f"Scheduling typing of: '{text}'")
                 # Schedule callback on main thread (text already has trailing space for flow)
@@ -1100,11 +1129,18 @@ class VoiceTyperWindow(Gtk.ApplicationWindow):
         if self.is_recording:
             return
         
-        self.is_recording = True
         audio_device = self.config.get('audio_device')
         self.recorder = AudioRecorder(self.on_speech_detected, audio_device=audio_device)
-        self.recorder.start()
-        # log.info("Recording started...")
+        success, error_msg = self.recorder.start()
+        
+        if not success:
+            # Show error dialog and uncheck the mic checkbox
+            self._show_mic_error(error_msg)
+            self.mic_checkbox.set_active(False)
+            self.recorder = None
+            return
+        
+        self.is_recording = True
         print("🎤 Microphone ON - listening...")
         
         # Initialize keyboard injector (triggers permission dialog on first use)
@@ -1112,6 +1148,19 @@ class VoiceTyperWindow(Gtk.ApplicationWindow):
         if not injector._initialized and not injector._initializing:
             # log.info("Initializing keyboard injector for first use...")
             injector.initialize(callback=self._on_keyboard_ready)
+    
+    def _show_mic_error(self, message):
+        """Show a warning dialog about microphone issues."""
+        dialog = Gtk.MessageDialog(
+            transient_for=self,
+            modal=True,
+            message_type=Gtk.MessageType.WARNING,
+            buttons=Gtk.ButtonsType.OK,
+            text="Microphone Error"
+        )
+        dialog.set_secondary_text(message)
+        dialog.connect("response", lambda d, r: d.destroy())
+        dialog.present()
     
     def _on_keyboard_ready(self, success):
         """Called when keyboard injector initialization completes."""
