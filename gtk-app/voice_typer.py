@@ -212,9 +212,9 @@ class AudioRecorder:
             text = transcribe_audio(audio_data)
             # log.info(f"Transcription result: '{text}'")
             if text and text.strip():
-                # log.info(f"Scheduling typing of: '{text.strip()}'")
-                # Schedule callback on main thread
-                GLib.idle_add(self.on_speech_detected, text.strip())
+                # log.info(f"Scheduling typing of: '{text}'")
+                # Schedule callback on main thread (text already has trailing space for flow)
+                GLib.idle_add(self.on_speech_detected, text)
             else:
                 # log.warning("Transcription returned empty text")
                 pass
@@ -394,6 +394,15 @@ def transcribe_audio(audio_data):
         if text and not text[0].isalnum():
             # log.warning(f"Filtered out likely hallucination (non-alphanumeric start): '{text}'")
             return None
+        
+        # Post-process: remove trailing punctuation, trim, add space for continuous dictation
+        if text:
+            # Strip trailing punctuation that whisper adds
+            while text and text[-1] in '.?!,;:':
+                text = text[:-1]
+            text = text.strip()
+            if text:
+                text = text + ' '  # Add space for smooth sentence flow
         
         return text
     
