@@ -13,5 +13,8 @@ sounddevice>=0.4.6
 # Numerical processing for RMS calculation
 numpy>=1.21.0
 
+# Configuration file storage
+PyYAML>=6.0
+
 # Note: Keyboard injection uses the XDG Remote Desktop Portal (via GLib/Gio)
 # which is included with PyGObject - no additional packages needed

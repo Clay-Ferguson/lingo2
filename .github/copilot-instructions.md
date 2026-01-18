@@ -56,7 +56,8 @@ cd gtk-app && ./run.sh  # Launch floating mic button
 - **Audio pipeline**: sounddevice (48kHz) → resample to 16kHz → normalize → whisper-cli
 - **Keyboard injection**: Uses XDG Remote Desktop Portal (Wayland-safe)
 - **Logging**: Writes to `gtk-app/voice_typer.log` (overwritten each run)
-- **Device selection**: Set `AUDIO_DEVICE = "Shure"` (or None for default)
+- **Config file**: `~/.config/lingo-gtk.yaml` stores user preferences (microphone selection)
+- **Device selection**: GUI dropdown lets user pick microphone; saved to config file
 
 ## Silence Detection Config
 

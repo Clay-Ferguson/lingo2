@@ -26,6 +26,7 @@ import time
 import os
 import logging
 from pathlib import Path
+import yaml
 
 # =============================================================================
 # Logging Setup
@@ -62,11 +63,6 @@ WHISPER_SAMPLE_RATE = 16000  # Rate whisper.cpp expects
 CHANNELS = 1
 DTYPE = np.int16
 
-# Audio device - None for default, or specify device name/index
-# Run: python3 -c "import sounddevice as sd; print(sd.query_devices())" to list devices
-# Set to None to use system default, or a string to match device name
-AUDIO_DEVICE = "Shure"  # Shure MV5C USB microphone
-
 # Silence detection
 # Lower threshold for quieter mics (0.001-0.005), higher for louder mics (0.01-0.02)
 # Adjust based on your microphone - check the "Audio RMS" log values when speaking
@@ -75,14 +71,70 @@ SILENCE_DURATION_S = 1.0  # Seconds of silence before transcription
 MIN_AUDIO_DURATION_S = 0.5  # Minimum audio length to process
 
 # =============================================================================
+# Configuration Management
+# =============================================================================
+
+CONFIG_DIR = Path.home() / ".config"
+CONFIG_FILE = CONFIG_DIR / "lingo-gtk.yaml"
+
+DEFAULT_CONFIG = {
+    "audio_device": None,  # None means system default
+}
+
+def load_config():
+    """Load configuration from YAML file, creating defaults if needed."""
+    if not CONFIG_FILE.exists():
+        save_config(DEFAULT_CONFIG)
+        return DEFAULT_CONFIG.copy()
+    
+    try:
+        with open(CONFIG_FILE, 'r') as f:
+            config = yaml.safe_load(f) or {}
+        # Merge with defaults for any missing keys
+        for key, value in DEFAULT_CONFIG.items():
+            if key not in config:
+                config[key] = value
+        return config
+    except Exception as e:
+        log.error(f"Failed to load config: {e}")
+        return DEFAULT_CONFIG.copy()
+
+def save_config(config):
+    """Save configuration to YAML file."""
+    try:
+        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        with open(CONFIG_FILE, 'w') as f:
+            yaml.dump(config, f, default_flow_style=False)
+        log.info(f"Config saved to {CONFIG_FILE}")
+    except Exception as e:
+        log.error(f"Failed to save config: {e}")
+
+def get_input_devices():
+    """Get list of available audio input devices."""
+    # Force PortAudio to re-scan devices (catches hot-plugged USB mics)
+    sd._terminate()
+    sd._initialize()
+    
+    devices = sd.query_devices()
+    input_devices = []
+    for i, d in enumerate(devices):
+        if d['max_input_channels'] > 0:
+            input_devices.append({
+                'index': i,
+                'name': d['name'],
+            })
+    return input_devices
+
+# =============================================================================
 # Audio Processing
 # =============================================================================
 
 class AudioRecorder:
     """Handles continuous audio recording with silence detection."""
     
-    def __init__(self, on_speech_detected):
+    def __init__(self, on_speech_detected, audio_device=None):
         self.on_speech_detected = on_speech_detected
+        self.audio_device = audio_device  # Device name or None for default
         self.is_running = False
         self.audio_buffer = []
         self.silence_start_time = None
@@ -100,24 +152,19 @@ class AudioRecorder:
         self.recording_start_time = time.time()
         self.speech_detected = False
         
-        # Find the audio device
+        # Find the audio device by name
         device = None
-        if AUDIO_DEVICE:
+        if self.audio_device:
             devices = sd.query_devices()
-            # log.debug(f"Searching for device containing '{AUDIO_DEVICE}' among {len(devices)} devices")
             for i, d in enumerate(devices):
-                if d['max_input_channels'] > 0:
-                    # log.debug(f"  Input device [{i}]: {d['name']}")
-                    pass
-                if AUDIO_DEVICE.lower() in d['name'].lower() and d['max_input_channels'] > 0:
+                if d['name'] == self.audio_device and d['max_input_channels'] > 0:
                     device = i
-                    # log.info(f"Found audio device: [{i}] {d['name']}")
+                    log.info(f"Using audio device: [{i}] {d['name']}")
                     break
             if device is None:
-                # log.warning(f"Device containing '{AUDIO_DEVICE}' not found, using default")
-                pass
+                log.warning(f"Device '{self.audio_device}' not found, using default")
         
-        # log.info(f"Starting audio stream: {RECORD_SAMPLE_RATE}Hz, {CHANNELS} channel(s), device={device}")
+        log.info(f"Starting audio stream: {RECORD_SAMPLE_RATE}Hz, {CHANNELS} channel(s), device={device}")
         
         self.stream = sd.InputStream(
             samplerate=RECORD_SAMPLE_RATE,
@@ -942,10 +989,11 @@ class VoiceTyperWindow(Gtk.ApplicationWindow):
         
         self.recorder = None
         self.is_recording = False
+        self.config = load_config()
         
         # Window setup - small dialog with title bar (draggable)
         self.set_title("Lingo")
-        self.set_default_size(150, -1)  # Minimal width, auto height
+        self.set_default_size(200, -1)  # Wider to fit dropdown
         self.set_resizable(False)
         
         # Create main vertical box
@@ -954,6 +1002,12 @@ class VoiceTyperWindow(Gtk.ApplicationWindow):
         vbox.set_margin_bottom(10)
         vbox.set_margin_start(15)
         vbox.set_margin_end(15)
+        
+        # Create microphone dropdown
+        self.mic_dropdown = Gtk.ComboBoxText()
+        self._populate_mic_dropdown()
+        self.mic_dropdown.connect("changed", self.on_mic_changed)
+        vbox.append(self.mic_dropdown)
         
         # Create "Mic" checkbox
         self.mic_checkbox = Gtk.CheckButton(label="Mic")
@@ -965,6 +1019,9 @@ class VoiceTyperWindow(Gtk.ApplicationWindow):
         css_provider.load_from_data(b"""
             window {
                 background: @theme_bg_color;
+            }
+            combobox {
+                font-size: 12px;
             }
             checkbutton {
                 font-size: 14px;
@@ -985,6 +1042,52 @@ class VoiceTyperWindow(Gtk.ApplicationWindow):
         # Handle window close
         self.connect("close-request", self.on_close_request)
     
+    def _populate_mic_dropdown(self):
+        """Populate the microphone dropdown with available input devices."""
+        # Add "System Default" as first option
+        self.mic_dropdown.append_text("System Default")
+        
+        # Add all input devices
+        self.input_devices = get_input_devices()
+        for device in self.input_devices:
+            self.mic_dropdown.append_text(device['name'])
+        
+        # Select saved device or default
+        saved_device = self.config.get('audio_device')
+        if saved_device is None:
+            self.mic_dropdown.set_active(0)  # System Default
+        else:
+            # Find the device in the list
+            found = False
+            for i, device in enumerate(self.input_devices):
+                if device['name'] == saved_device:
+                    self.mic_dropdown.set_active(i + 1)  # +1 because of "System Default"
+                    found = True
+                    break
+            if not found:
+                log.warning(f"Saved device '{saved_device}' not found, using default")
+                self.mic_dropdown.set_active(0)
+    
+    def on_mic_changed(self, combo):
+        """Handle microphone selection change."""
+        # Stop recording if active
+        if self.mic_checkbox.get_active():
+            self.mic_checkbox.set_active(False)
+        
+        # Get selected device
+        active_index = combo.get_active()
+        if active_index == 0:
+            # System Default
+            self.config['audio_device'] = None
+        else:
+            # Specific device
+            device = self.input_devices[active_index - 1]
+            self.config['audio_device'] = device['name']
+        
+        # Save config
+        save_config(self.config)
+        log.info(f"Microphone changed to: {self.config['audio_device'] or 'System Default'}")
+    
     def on_mic_toggled(self, checkbox):
         """Handle mic checkbox toggle."""
         if checkbox.get_active():
@@ -998,7 +1101,8 @@ class VoiceTyperWindow(Gtk.ApplicationWindow):
             return
         
         self.is_recording = True
-        self.recorder = AudioRecorder(self.on_speech_detected)
+        audio_device = self.config.get('audio_device')
+        self.recorder = AudioRecorder(self.on_speech_detected, audio_device=audio_device)
         self.recorder.start()
         # log.info("Recording started...")
         print("🎤 Microphone ON - listening...")
