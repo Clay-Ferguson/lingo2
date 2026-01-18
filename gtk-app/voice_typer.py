@@ -79,6 +79,7 @@ CONFIG_FILE = CONFIG_DIR / "lingo-gtk.yaml"
 
 DEFAULT_CONFIG = {
     "audio_device": None,  # None means system default
+    "portal_restore_token": None,  # Saved token for XDG Remote Desktop Portal session persistence
 }
 
 def load_config():
@@ -581,6 +582,9 @@ class KeyboardInjector:
     
     This allows Wayland applications to simulate keyboard input without
     requiring root permissions or X11.
+    
+    Supports session persistence via restore tokens (Portal v2) to avoid
+    repeated permission dialogs. The restore token is saved to config.
     """
     
     def __init__(self):
@@ -590,6 +594,7 @@ class KeyboardInjector:
         self._signal_id = None
         self._initializing = False
         self._initialized = False
+        self._restore_token = None  # Token for restoring session without dialog
     
     def _generate_token(self):
         """Generate a unique token for portal requests."""
@@ -737,12 +742,23 @@ class KeyboardInjector:
         )
         
         # types: 1=keyboard, 2=pointer, 3=both
+        # persist_mode: 0=don't persist, 1=persist while app runs, 2=persist until revoked
+        options = {
+            "handle_token": GLib.Variant("s", token),
+            "types": GLib.Variant("u", 1),  # Keyboard only
+            "persist_mode": GLib.Variant("u", 2),  # Persist until explicitly revoked
+        }
+        
+        # Load saved restore token from config
+        config = load_config()
+        saved_token = config.get("portal_restore_token")
+        if saved_token:
+            log.debug(f"Using saved restore token to skip permission dialog")
+            options["restore_token"] = GLib.Variant("s", saved_token)
+        
         params = GLib.Variant("(oa{sv})", (
             self.session_handle,
-            {
-                "handle_token": GLib.Variant("s", token),
-                "types": GLib.Variant("u", 1),  # Keyboard only
-            }
+            options
         ))
         
         self.connection.call(
@@ -854,15 +870,27 @@ class KeyboardInjector:
         if response != 0:
             if response == 1:
                 # log.warning("User cancelled the Remote Desktop permission dialog")
-                pass
+                # Clear any saved token since user denied permission
+                self._clear_restore_token()
             else:
                 # log.error(f"Start session failed with response code: {response}")
-                pass
+                # Token may be invalid/expired, clear it so next attempt prompts fresh
+                self._clear_restore_token()
             self._initializing = False
             self._initialized = False
             if self._init_callback:
                 self._init_callback(False)
             return
+        
+        # Save the restore token for future sessions (Portal v2 feature)
+        # This allows skipping the permission dialog on subsequent runs
+        new_token = results.get("restore_token")
+        if new_token:
+            self._restore_token = new_token
+            config = load_config()
+            config["portal_restore_token"] = new_token
+            save_config(config)
+            log.info("Saved portal restore token - future runs won't need permission dialog")
         
         # log.info("✅ Remote Desktop session started successfully!")
         self._initialized = True
@@ -876,6 +904,15 @@ class KeyboardInjector:
             text = self.pending_text
             self.pending_text = None
             self.type_text(text)
+    
+    def _clear_restore_token(self):
+        """Clear the saved restore token from config."""
+        self._restore_token = None
+        config = load_config()
+        if config.get("portal_restore_token"):
+            config["portal_restore_token"] = None
+            save_config(config)
+            log.debug("Cleared saved portal restore token")
     
     def _cleanup_signal(self):
         """Unsubscribe from current signal."""

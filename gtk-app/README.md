@@ -112,7 +112,9 @@ This app uses the **XDG Remote Desktop Portal** for keyboard input on Wayland. O
 
 1. A system dialog will appear: *"Allow Voice Typer to remote control your desktop?"*
 2. Click **Allow** to grant keyboard access
-3. This permission persists until you close the app
+3. **The permission is saved** - you won't see this dialog again (uses Portal v2 `persist_mode`)
+
+The restore token is stored in `~/.config/lingo-gtk.yaml`. If you ever need to reset permissions (e.g., after a system update breaks things), delete the `portal_restore_token` entry from that file.
 
 If the permission dialog doesn't appear or typing still doesn't work:
 
