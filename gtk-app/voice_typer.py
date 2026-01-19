@@ -1301,7 +1301,7 @@ class VoiceTyperWindow(Gtk.ApplicationWindow):
             self.remove_css_class('processing')
             log.debug("Processing complete - background restored")
         return False  # Don't repeat (for GLib.idle_add)
-    
+
     def on_speech_detected(self, text):
         """Called when speech is transcribed."""
         # log.info(f"on_speech_detected callback called with: '{text}'")
