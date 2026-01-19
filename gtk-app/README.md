@@ -2,13 +2,13 @@
 
 A lightweight Linux desktop application that provides system-wide voice-to-text input. Speak naturally and your words appear wherever your cursor is focused - in any application!
 
+![](screenshot.png)
+
 ## How It Works
 
-1. **Trigger the app** via a keyboard shortcut (you configure this)
-2. **A small floating button** appears in the upper-right corner
-3. **Speak naturally** - after 1 second of silence, your speech is transcribed
-4. **Text is typed** wherever your cursor is focused
-5. **Click the button** or press **ESC** to close
+1. **Speak naturally** - after 1 second of silence, your speech is transcribed
+2. **Text is typed** wherever your cursor is focused
+3. **Click the button** or press **ESC** to close
 
 ## Prerequisites
 
