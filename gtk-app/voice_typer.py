@@ -1084,10 +1084,23 @@ class VoiceTyperWindow(Gtk.ApplicationWindow):
         self.mic_dropdown.connect("changed", self.on_mic_changed)
         vbox.append(self.mic_dropdown)
         
+        # Create horizontal box for checkbox and close button
+        hbox = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        
         # Create "Microphone" checkbox
         self.mic_checkbox = Gtk.CheckButton(label="Microphone")
         self.mic_checkbox.connect("toggled", self.on_mic_toggled)
-        vbox.append(self.mic_checkbox)
+        hbox.append(self.mic_checkbox)
+        
+        # Create close button (pushed to the right)
+        close_button = Gtk.Button(label="Close")
+        close_button.add_css_class("close-button")
+        close_button.set_hexpand(True)  # Take remaining space
+        close_button.set_halign(Gtk.Align.END)  # Align to right
+        close_button.connect("clicked", lambda btn: self.close())
+        hbox.append(close_button)
+        
+        vbox.append(hbox)
         
         # Store reference to main container for processing state styling
         self.main_container = vbox
@@ -1115,6 +1128,12 @@ class VoiceTyperWindow(Gtk.ApplicationWindow):
             checkbutton:checked label {
                 color: #e53935;
                 font-weight: bold;
+            }
+            .close-button {
+                min-width: 60px;
+                min-height: 36px;
+                padding: 6px 16px;
+                font-size: 16px;
             }
         """)
         Gtk.StyleContext.add_provider_for_display(
