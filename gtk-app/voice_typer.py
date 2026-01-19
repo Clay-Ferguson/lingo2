@@ -145,6 +145,7 @@ class AudioRecorder:
         self.speech_confirm_count = 0  # Counter for consecutive above-threshold chunks
         self.stream = None
         self.lock = threading.Lock()
+        self.processing_notified = False
     
     def start(self):
         """Start recording from microphone.
@@ -157,6 +158,7 @@ class AudioRecorder:
         self.silence_start_time = None
         self.recording_start_time = time.time()
         self.speech_detected = False
+        self.processing_notified = False
         
         # Find the audio device by name
         device = None
@@ -212,6 +214,25 @@ class AudioRecorder:
             self.stream.stop()
             self.stream.close()
             self.stream = None
+        with self.lock:
+            if self.processing_notified:
+                self.processing_notified = False
+                if self.on_processing_state_changed:
+                    GLib.idle_add(self.on_processing_state_changed, False)
+
+    def _activate_processing_indicator(self):
+        if self.processing_notified:
+            return
+        self.processing_notified = True
+        if self.on_processing_state_changed:
+            GLib.idle_add(self.on_processing_state_changed, True)
+
+    def _deactivate_processing_indicator(self):
+        if not self.processing_notified:
+            return
+        self.processing_notified = False
+        if self.on_processing_state_changed:
+            GLib.idle_add(self.on_processing_state_changed, False)
     
     def _audio_callback(self, indata, frames, time_info, status):
         """Called for each audio chunk from the microphone."""
@@ -271,9 +292,11 @@ class AudioRecorder:
                         self.speech_detected = False
                         self.speech_confirm_count = 0  # Reset confirmation counter
                         self.peak_rms = 0.0  # Reset peak
+                        self._deactivate_processing_indicator()
             else:
                 # Above threshold - might be speech, but require sustained signal
                 self.silence_start_time = None
+                self._activate_processing_indicator()
                 self.speech_confirm_count += 1
                 
                 if not self.speech_detected and self.speech_confirm_count >= SPEECH_CONFIRM_CHUNKS:
@@ -287,26 +310,30 @@ class AudioRecorder:
         log.info(f">>> SUBMITTING TO WHISPER: {len(audio_data)} samples ({duration_s:.2f}s of audio)")
         
         # Signal that processing has started (turn background orange)
-        if self.on_processing_state_changed:
-            GLib.idle_add(self.on_processing_state_changed, True)
+        with self.lock:
+            self._activate_processing_indicator()
         
+        def schedule_processing_complete():
+            with self.lock:
+                self._deactivate_processing_indicator()
+
         try:
             text = transcribe_audio(audio_data)
             log.info(f">>> WHISPER RETURNED: '{text}'" if text else ">>> WHISPER RETURNED: (empty/None)")
             if text and text.strip():
-                # log.info(f"Scheduling typing of: '{text}'")
+                def typing_finished():
+                    with self.lock:
+                        self._deactivate_processing_indicator()
+                    return False
+
                 # Schedule callback on main thread (text already has trailing space for flow)
-                GLib.idle_add(self.on_speech_detected, text)
+                GLib.idle_add(self.on_speech_detected, text, typing_finished)
             else:
                 # log.warning("Transcription returned empty text")
-                pass
+                schedule_processing_complete()
         except Exception as e:
             # log.error(f"Transcription error: {e}", exc_info=True)
-            pass
-        finally:
-            # Signal that processing has ended (restore background)
-            if self.on_processing_state_changed:
-                GLib.idle_add(self.on_processing_state_changed, False)
+            schedule_processing_complete()
 
 
 def normalize_audio(audio_data):
@@ -449,7 +476,7 @@ def transcribe_audio(audio_data):
             cmd,
             capture_output=True,
             text=True,
-            timeout=30,
+            timeout=60,
             env=env
         )
         
@@ -591,6 +618,7 @@ class KeyboardInjector:
         self.connection = None
         self.session_handle = None
         self.pending_text = None
+        self._pending_callback = None
         self._signal_id = None
         self._initializing = False
         self._initialized = False
@@ -878,6 +906,13 @@ class KeyboardInjector:
                 self._clear_restore_token()
             self._initializing = False
             self._initialized = False
+            if self.pending_text:
+                # Ensure pending callbacks fire even if we cannot type
+                callback = self._pending_callback
+                self.pending_text = None
+                self._pending_callback = None
+                if callback:
+                    callback()
             if self._init_callback:
                 self._init_callback(False)
             return
@@ -902,8 +937,10 @@ class KeyboardInjector:
         # If there was pending text, type it now
         if self.pending_text:
             text = self.pending_text
+            callback = self._pending_callback
             self.pending_text = None
-            self.type_text(text)
+            self._pending_callback = None
+            self._start_typing(text, callback)
     
     def _clear_restore_token(self):
         """Clear the saved restore token from config."""
@@ -920,44 +957,52 @@ class KeyboardInjector:
             self.connection.signal_unsubscribe(self._signal_id)
             self._signal_id = None
     
-    def type_text(self, text):
+    def type_text(self, text, on_finished=None):
         """
         Type the given text by simulating keyboard input.
         
         Args:
             text: The string to type
+            on_finished: Optional callback invoked when typing completes
         """
         if not self._initialized:
             # log.warning("Keyboard injector not initialized, queuing text")
             self.pending_text = text
+            self._pending_callback = on_finished
             if not self._initializing:
                 self.initialize()
             return
         
         # log.info(f"Typing text: '{text}'")
-        
-        # Type each character with a small delay
+        self._start_typing(text, on_finished)
+
+    def _start_typing(self, text, on_finished):
+        """Begin typing text with optional completion callback."""
+        if not text:
+            if on_finished:
+                on_finished()
+            return
+
         def type_char_at_index(index):
             if index >= len(text):
-                # log.debug("Finished typing text")
-                return False  # Stop the timeout
-            
+                if on_finished:
+                    on_finished()
+                return False
+
             char = text[index]
             keysym = CHAR_TO_KEYSYM.get(char)
-            
+
             if keysym is None:
                 # Try Unicode keysym for unsupported characters
                 keysym = 0x01000000 | ord(char)
                 # log.debug(f"Using Unicode keysym for '{char}': {hex(keysym)}")
-            
+
             self._send_key(keysym, pressed=True)
             self._send_key(keysym, pressed=False)
-            
-            # Schedule next character (1ms delay - minimal pause between keystrokes)
+
             GLib.timeout_add(1, type_char_at_index, index + 1)
-            return False  # Don't repeat this timeout
-        
-        # Start typing
+            return False
+
         GLib.idle_add(type_char_at_index, 0)
     
     def _send_key(self, keysym, pressed):
@@ -1035,7 +1080,7 @@ def get_keyboard_injector():
     return _keyboard_injector
 
 
-def type_text(text):
+def type_text(text, on_finished=None):
     """
     Type text by simulating keyboard input via XDG Remote Desktop Portal.
     
@@ -1044,12 +1089,13 @@ def type_text(text):
     
     Args:
         text: The string to type
+        on_finished: Optional callback invoked after typing completes
     """
     # log.info(f"TRANSCRIBED: '{text}'")
     print(f"\n🎯 TRANSCRIBED: {text}\n")
     
     injector = get_keyboard_injector()
-    injector.type_text(text)
+    injector.type_text(text, on_finished=on_finished)
 
 
 # =============================================================================
@@ -1302,11 +1348,19 @@ class VoiceTyperWindow(Gtk.ApplicationWindow):
             log.debug("Processing complete - background restored")
         return False  # Don't repeat (for GLib.idle_add)
 
-    def on_speech_detected(self, text):
+    def on_speech_detected(self, text, completion_callback=None):
         """Called when speech is transcribed."""
         # log.info(f"on_speech_detected callback called with: '{text}'")
-        type_text(text)
+        finished_cb = completion_callback or self._on_typing_finished
+        try:
+            type_text(text, on_finished=finished_cb)
+        except Exception:
+            finished_cb()
         return False  # Don't repeat
+
+    def _on_typing_finished(self):
+        """Reset processing indicator after typing completes."""
+        self.on_processing_state_changed(False)
     
     def on_close_request(self, window):
         """Clean up when window closes."""
