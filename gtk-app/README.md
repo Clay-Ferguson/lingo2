@@ -6,9 +6,11 @@ A lightweight Linux desktop application that provides system-wide voice-to-text 
 
 ## How It Works
 
-1. **Speak naturally** - after 1 second of silence, your speech is transcribed
-2. **Text is typed** wherever your cursor is focused
-3. **Click the button** or press **ESC** to close
+1. **Select Microphone** - select your device for your mic
+2. **Click Microphone Checkbox** - when the checkbox is checked aything you speak will be typed into wherever your edit cursor is, in any application system wide.  
+3. **Speak naturally** - after 1 second of silence, your speech is transcribed
+4. **Text is typed** wherever your cursor is focused
+5. **Click the button** or press **ESC** to close
 
 ## Prerequisites
 
