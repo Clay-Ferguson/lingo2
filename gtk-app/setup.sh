@@ -118,8 +118,34 @@ if [ ! -f "$WHISPER_BINARY" ] || [ ! -f "$WHISPER_MODEL" ]; then
     echo ""
 fi
 
+# Install desktop file for dock/taskbar integration
+echo "🖼️  Installing desktop integration..."
+APP_ID="com.lingo.voicetyper"
+DESKTOP_DIR="$HOME/.local/share/applications"
+
+mkdir -p "$DESKTOP_DIR"
+
+# Create desktop file (uses icon directly from project)
+cat > "$DESKTOP_DIR/$APP_ID.desktop" << EOF
+[Desktop Entry]
+Name=Lingo Voice Typer
+Comment=System-wide voice-to-text input
+Exec=python3 $SCRIPT_DIR/voice_typer.py
+Icon=$SCRIPT_DIR/lingo-logo.png
+Terminal=false
+Type=Application
+Categories=Utility;Accessibility;
+StartupWMClass=$APP_ID
+EOF
+
+update-desktop-database "$DESKTOP_DIR" 2>/dev/null || true
+
+echo "✅ Desktop integration installed!"
+
 echo ""
 echo "✅ GTK app setup complete!"
 echo ""
 echo "Start the app with: ./run.sh"
+echo ""
+echo "Note: You may need to log out/in for the dock icon to appear."
 echo ""
