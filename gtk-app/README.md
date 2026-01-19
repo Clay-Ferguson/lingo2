@@ -96,6 +96,12 @@ Edit `voice_typer.py` to customize:
 | `SILENCE_DURATION_S` | 1.0 | Seconds of silence before transcription |
 | `MIN_AUDIO_DURATION_S` | 0.5 | Minimum speech length to process |
 
+## Tips
+
+This application works best in a quiet room, with the threshold setting (on the GUI) set so low that it will even pick up mouse clicks and keyboard entry noises from time to time. The background of the app will turn green whenever it has detected something on your microphone, and it will successfully ignore things that aren't speech. 
+
+However if you set the threshold too high, the input can sometimes miss chunks of your speech, so if you run into any problems at all, the first thing to try is to lower the threshold value. On a high quality microphone in a quiet room an ideal threshold may be as low as "0.001" but if you're in a more noisy environment, you might need to set the threshold up to "0.02" or even higher.
+
 ## Troubleshooting
 
 ### "No audio input devices found"

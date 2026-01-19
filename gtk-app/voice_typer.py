@@ -65,7 +65,7 @@ DTYPE = np.int16
 # Silence detection
 # Lower threshold for quieter mics (0.001-0.005), higher for louder mics (0.01-0.02)
 # Adjust based on your microphone - check the "Audio RMS" log values when speaking
-SILENCE_THRESHOLD = 0.005  # RMS level below this is silence (raised to filter electrical spikes)
+DEFAULT_SILENCE_THRESHOLD = 0.005  # RMS level below this is silence (raised to filter electrical spikes)
 SILENCE_DURATION_S = 1.0  # Seconds of silence before transcription
 MIN_AUDIO_DURATION_S = 0.5  # Minimum audio length to process
 SPEECH_CONFIRM_CHUNKS = 3  # Require this many consecutive above-threshold chunks to confirm speech
@@ -80,6 +80,7 @@ CONFIG_FILE = CONFIG_DIR / "lingo-gtk.yaml"
 DEFAULT_CONFIG = {
     "audio_device": None,  # None means system default
     "portal_restore_token": None,  # Saved token for XDG Remote Desktop Portal session persistence
+    "silence_threshold": DEFAULT_SILENCE_THRESHOLD,
 }
 
 def load_config():
@@ -95,6 +96,10 @@ def load_config():
         for key, value in DEFAULT_CONFIG.items():
             if key not in config:
                 config[key] = value
+        try:
+            config["silence_threshold"] = float(config.get("silence_threshold", DEFAULT_SILENCE_THRESHOLD))
+        except (TypeError, ValueError):
+            config["silence_threshold"] = DEFAULT_SILENCE_THRESHOLD
         return config
     except Exception as e:
         log.error(f"Failed to load config: {e}")
@@ -133,7 +138,8 @@ def get_input_devices():
 class AudioRecorder:
     """Handles continuous audio recording with silence detection."""
     
-    def __init__(self, on_speech_detected, audio_device=None, on_processing_phase_changed=None):
+    def __init__(self, on_speech_detected, audio_device=None, on_processing_phase_changed=None,
+                 silence_threshold=DEFAULT_SILENCE_THRESHOLD):
         self.on_speech_detected = on_speech_detected
         self.on_processing_phase_changed = on_processing_phase_changed  # Callback for UI phase changes
         self.audio_device = audio_device  # Device name or None for default
@@ -146,6 +152,7 @@ class AudioRecorder:
         self.stream = None
         self.lock = threading.RLock()
         self.current_phase = 'idle'
+        self.silence_threshold = float(silence_threshold)
     
     def start(self):
         """Start recording from microphone.
@@ -224,6 +231,11 @@ class AudioRecorder:
                 notify = True
         if notify and self.on_processing_phase_changed:
             GLib.idle_add(self.on_processing_phase_changed, phase)
+
+    def set_silence_threshold(self, value):
+        with self.lock:
+            self.silence_threshold = float(value)
+        log.info(f"Silence threshold updated to {self.silence_threshold:.6f}")
     
     def _audio_callback(self, indata, frames, time_info, status):
         """Called for each audio chunk from the microphone."""
@@ -249,8 +261,9 @@ class AudioRecorder:
             self.audio_buffer.append(indata.copy())
             
             now = time.time()
+            threshold = self.silence_threshold
             
-            if rms < SILENCE_THRESHOLD:
+            if rms < threshold:
                 if self.current_phase == 'speech-detected' and not self.speech_detected:
                     self._transition_to_phase('idle')
                 # Below threshold - might be silence
@@ -296,7 +309,7 @@ class AudioRecorder:
                 
                 if not self.speech_detected and self.speech_confirm_count >= SPEECH_CONFIRM_CHUNKS:
                     # Confirmed speech - multiple consecutive chunks above threshold
-                    log.info(f">>> VOICE CONFIRMED (RMS={rms:.6f} > threshold={SILENCE_THRESHOLD})")
+                    log.info(f">>> VOICE CONFIRMED (RMS={rms:.6f} > threshold={threshold})")
                     self.speech_detected = True
     
     def _process_audio(self, audio_data):
@@ -1155,6 +1168,8 @@ class VoiceTyperWindow(Gtk.ApplicationWindow):
         hbox.append(close_button)
         
         vbox.append(hbox)
+
+        vbox.append(self._create_advanced_settings_section())
         
         # Store reference to main container for processing state styling
         self.main_container = vbox
@@ -1197,6 +1212,10 @@ class VoiceTyperWindow(Gtk.ApplicationWindow):
                 padding: 6px 16px;
                 font-size: 16px;
             }
+            .help-text {
+                font-size: 14px;
+                opacity: 0.7;
+            }
         """)
         Gtk.StyleContext.add_provider_for_display(
             Gdk.Display.get_default(),
@@ -1229,6 +1248,95 @@ class VoiceTyperWindow(Gtk.ApplicationWindow):
         if target_class:
             self.add_css_class(target_class)
             self._active_phase_class = target_class
+
+    def _create_advanced_settings_section(self):
+        expander = Gtk.Expander(label="Advanced Settings")
+        expander.set_expanded(False)
+        expander.set_hexpand(True)
+
+        container = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        container.set_margin_top(6)
+        container.set_margin_start(4)
+        container.set_margin_end(4)
+        container.set_margin_bottom(4)
+
+        threshold_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        threshold_label = Gtk.Label(label="Silence threshold", xalign=0)
+        threshold_label.set_hexpand(True)
+        threshold_row.append(threshold_label)
+
+        self.threshold_entry = Gtk.Entry()
+        self.threshold_entry.set_width_chars(6)
+        self.threshold_entry.set_max_length(8)
+        self.threshold_entry.set_input_purpose(Gtk.InputPurpose.NUMBER)
+        self.threshold_entry.set_tooltip_text("Lower values detect quieter audio; higher values filter background noise.")
+        self.threshold_entry.set_text(self._format_threshold(self._get_silence_threshold()))
+        self.threshold_entry.connect("activate", self.on_threshold_entry_activate)
+
+        focus_controller = Gtk.EventControllerFocus()
+        focus_controller.connect("leave", self.on_threshold_entry_focus_leave)
+        self.threshold_entry.add_controller(focus_controller)
+
+        threshold_row.append(self.threshold_entry)
+        container.append(threshold_row)
+
+        help_label = Gtk.Label(
+            label="Typical range is 0.001–0.02: lower values make the mic more sensitive; raise it to ignore background noise."+
+            " Set the value as low as possible for best reliablility. If you have any problems with this application try lowering this threshold value.",
+            xalign=0
+        )
+        help_label.set_wrap(True)
+        help_label.add_css_class("help-text")
+        container.append(help_label)
+
+        expander.set_child(container)
+        return expander
+
+    def _get_silence_threshold(self):
+        return float(self.config.get('silence_threshold', DEFAULT_SILENCE_THRESHOLD))
+
+    def _format_threshold(self, value):
+        formatted = f"{float(value):.4f}".rstrip('0').rstrip('.')
+        return formatted if formatted else "0"
+
+    def _set_threshold_entry_text(self, value):
+        self.threshold_entry.set_text(self._format_threshold(value))
+
+    def _commit_threshold_entry(self):
+        text = self.threshold_entry.get_text().strip()
+        if not text:
+            self._set_threshold_entry_text(self._get_silence_threshold())
+            return
+        try:
+            value = float(text)
+        except ValueError:
+            print("⚠️  Silence threshold must be a number.")
+            self._set_threshold_entry_text(self._get_silence_threshold())
+            return
+        if value <= 0:
+            print("⚠️  Silence threshold must be positive.")
+            self._set_threshold_entry_text(self._get_silence_threshold())
+            return
+        self._update_silence_threshold(value)
+
+    def _update_silence_threshold(self, value):
+        value = float(value)
+        current = self._get_silence_threshold()
+        if abs(current - value) < 1e-6:
+            self._set_threshold_entry_text(value)
+            return
+        self.config['silence_threshold'] = value
+        save_config(self.config)
+        if self.recorder:
+            self.recorder.set_silence_threshold(value)
+        self._set_threshold_entry_text(value)
+        print(f"🎚️ Silence threshold set to {self._format_threshold(value)}")
+
+    def on_threshold_entry_activate(self, entry):
+        self._commit_threshold_entry()
+
+    def on_threshold_entry_focus_leave(self, controller):
+        self._commit_threshold_entry()
 
     def _auto_start_microphone(self):
         """Auto-start the microphone when the application launches."""
@@ -1314,7 +1422,8 @@ class VoiceTyperWindow(Gtk.ApplicationWindow):
         self.recorder = AudioRecorder(
             self.on_speech_detected,
             audio_device=audio_device,
-            on_processing_phase_changed=self.on_processing_phase_changed
+            on_processing_phase_changed=self.on_processing_phase_changed,
+            silence_threshold=self._get_silence_threshold()
         )
         success, error_msg = self.recorder.start()
         
