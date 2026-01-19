@@ -285,7 +285,8 @@ class AudioRecorder:
                         self.speech_detected = False
                         self.speech_confirm_count = 0  # Reset confirmation counter
                         self.peak_rms = 0.0  # Reset peak
-                        self._transition_to_phase('idle')
+                        if self.current_phase == 'speech-detected':
+                            self._transition_to_phase('idle')
             else:
                 # Above threshold - might be speech, but require sustained signal
                 self.silence_start_time = None
