@@ -1,7 +1,7 @@
 #!/bin/bash
 # Start Voice Typer GTK application
 #
-# Prerequisites: Run ./setup.sh first to install dependencies
+# Automatically checks/repairs the virtual environment if needed.
 
 set -e
 
@@ -10,20 +10,28 @@ cd "$SCRIPT_DIR"
 
 VENV_DIR=".venv"
 
-# Check that setup has been run
-if [ ! -d "$VENV_DIR" ]; then
-    echo "❌ Virtual environment not found!"
-    echo ""
-    echo "Please run ./setup.sh first"
-    echo ""
-    exit 1
-fi
+# Quick check: can we import the required modules?
+check_env() {
+    "$VENV_DIR/bin/python" -c "import numpy, sounddevice, gi" 2>/dev/null
+}
 
-# Activate virtual environment
-source "$VENV_DIR/bin/activate"
+# Recreate venv with system-site-packages (needed for PyGObject/GTK)
+setup_venv() {
+    echo "🔧 Setting up Python environment..."
+    rm -rf "$VENV_DIR"
+    python3 -m venv --system-site-packages "$VENV_DIR"
+    "$VENV_DIR/bin/pip" install -q -r requirements.txt
+    echo "✅ Environment ready"
+    echo ""
+}
+
+# Check if venv exists and works, otherwise set it up
+if [ ! -d "$VENV_DIR" ] || ! check_env; then
+    setup_venv
+fi
 
 echo "🎤 Starting Voice Typer..."
 echo "   Click the button or press ESC to close"
 echo ""
 
-python3 voice_typer.py
+"$VENV_DIR/bin/python" voice_typer.py

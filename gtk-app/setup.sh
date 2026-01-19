@@ -44,6 +44,7 @@ case $PKG_MANAGER in
             python3-gi \
             python3-gi-cairo \
             gir1.2-gtk-4.0 \
+            python3-venv \
             portaudio19-dev \
             ffmpeg
         ;;

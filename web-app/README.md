@@ -140,7 +140,7 @@ Browser (web-app/lingo.html/js)  →  HTTP POST (audio blob)  →  FastAPI Serve
 ## 📁 Project Structure
 
 ```
-lingo2-whisper/
+lingo2/
 ├── setup-whisper.sh        # Setup script: clones/builds whisper.cpp
 ├── whisper-model/          # Created by setup-whisper.sh
 │   └── whisper.cpp/        # whisper.cpp repo with binary and models
