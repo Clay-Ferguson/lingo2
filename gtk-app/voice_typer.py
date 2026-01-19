@@ -1115,7 +1115,7 @@ class VoiceTyperWindow(Gtk.ApplicationWindow):
                 background: #E67E22;
             }
             combobox {
-                font-size: 12px;
+                font-size: 20px;
             }
             checkbutton {
                 font-size: 20px;
