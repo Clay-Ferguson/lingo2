@@ -133,9 +133,9 @@ def get_input_devices():
 class AudioRecorder:
     """Handles continuous audio recording with silence detection."""
     
-    def __init__(self, on_speech_detected, audio_device=None, on_processing_state_changed=None):
+    def __init__(self, on_speech_detected, audio_device=None, on_processing_phase_changed=None):
         self.on_speech_detected = on_speech_detected
-        self.on_processing_state_changed = on_processing_state_changed  # Callback for processing state
+        self.on_processing_phase_changed = on_processing_phase_changed  # Callback for UI phase changes
         self.audio_device = audio_device  # Device name or None for default
         self.is_running = False
         self.audio_buffer = []
@@ -144,8 +144,8 @@ class AudioRecorder:
         self.speech_detected = False  # Track if we've heard speech above threshold
         self.speech_confirm_count = 0  # Counter for consecutive above-threshold chunks
         self.stream = None
-        self.lock = threading.Lock()
-        self.processing_notified = False
+        self.lock = threading.RLock()
+        self.current_phase = 'idle'
     
     def start(self):
         """Start recording from microphone.
@@ -158,7 +158,7 @@ class AudioRecorder:
         self.silence_start_time = None
         self.recording_start_time = time.time()
         self.speech_detected = False
-        self.processing_notified = False
+        self.current_phase = 'idle'
         
         # Find the audio device by name
         device = None
@@ -214,25 +214,16 @@ class AudioRecorder:
             self.stream.stop()
             self.stream.close()
             self.stream = None
+        self._transition_to_phase('idle')
+
+    def _transition_to_phase(self, phase):
+        notify = False
         with self.lock:
-            if self.processing_notified:
-                self.processing_notified = False
-                if self.on_processing_state_changed:
-                    GLib.idle_add(self.on_processing_state_changed, False)
-
-    def _activate_processing_indicator(self):
-        if self.processing_notified:
-            return
-        self.processing_notified = True
-        if self.on_processing_state_changed:
-            GLib.idle_add(self.on_processing_state_changed, True)
-
-    def _deactivate_processing_indicator(self):
-        if not self.processing_notified:
-            return
-        self.processing_notified = False
-        if self.on_processing_state_changed:
-            GLib.idle_add(self.on_processing_state_changed, False)
+            if self.current_phase != phase:
+                self.current_phase = phase
+                notify = True
+        if notify and self.on_processing_phase_changed:
+            GLib.idle_add(self.on_processing_phase_changed, phase)
     
     def _audio_callback(self, indata, frames, time_info, status):
         """Called for each audio chunk from the microphone."""
@@ -260,6 +251,8 @@ class AudioRecorder:
             now = time.time()
             
             if rms < SILENCE_THRESHOLD:
+                if self.current_phase == 'speech-detected' and not self.speech_detected:
+                    self._transition_to_phase('idle')
                 # Below threshold - might be silence
                 if self.silence_start_time is None:
                     self.silence_start_time = now
@@ -292,11 +285,12 @@ class AudioRecorder:
                         self.speech_detected = False
                         self.speech_confirm_count = 0  # Reset confirmation counter
                         self.peak_rms = 0.0  # Reset peak
-                        self._deactivate_processing_indicator()
+                        self._transition_to_phase('idle')
             else:
                 # Above threshold - might be speech, but require sustained signal
                 self.silence_start_time = None
-                self._activate_processing_indicator()
+                if self.current_phase in ('idle', 'speech-detected'):
+                    self._transition_to_phase('speech-detected')
                 self.speech_confirm_count += 1
                 
                 if not self.speech_detected and self.speech_confirm_count >= SPEECH_CONFIRM_CHUNKS:
@@ -309,23 +303,21 @@ class AudioRecorder:
         duration_s = len(audio_data) / RECORD_SAMPLE_RATE
         log.info(f">>> SUBMITTING TO WHISPER: {len(audio_data)} samples ({duration_s:.2f}s of audio)")
         
-        # Signal that processing has started (turn background orange)
-        with self.lock:
-            self._activate_processing_indicator()
+        # Signal that audio is headed to whisper (turn background orange)
+        self._transition_to_phase('transcribing')
         
         def schedule_processing_complete():
-            with self.lock:
-                self._deactivate_processing_indicator()
+            self._transition_to_phase('idle')
 
         try:
             text = transcribe_audio(audio_data)
             log.info(f">>> WHISPER RETURNED: '{text}'" if text else ">>> WHISPER RETURNED: (empty/None)")
             if text and text.strip():
                 def typing_finished():
-                    with self.lock:
-                        self._deactivate_processing_indicator()
+                    self._transition_to_phase('idle')
                     return False
 
+                self._transition_to_phase('typing')
                 # Schedule callback on main thread (text already has trailing space for flow)
                 GLib.idle_add(self.on_speech_detected, text, typing_finished)
             else:
@@ -442,14 +434,15 @@ def transcribe_audio(audio_data):
     # Normalize audio to use more dynamic range (helps whisper with quiet audio)
     audio_data = normalize_audio(audio_data)
     
-    # Write audio to temporary WAV file (keep for debugging)
-    wav_path = f"/tmp/voice_typer_debug.wav"
+    # Write audio to a unique temporary WAV file (kept only during processing)
+    timestamp_ms = int(time.time() * 1000)
+    wav_path = Path("/tmp") / f"voice_typer_{timestamp_ms}_{threading.get_ident()}.wav"
     
     # log.debug(f"Writing audio to file: {wav_path}")
     
     try:
         # Write WAV file at whisper's expected rate
-        with wave.open(wav_path, 'wb') as wf:
+        with wave.open(str(wav_path), 'wb') as wf:
             wf.setnchannels(CHANNELS)
             wf.setsampwidth(2)  # 16-bit = 2 bytes
             wf.setframerate(WHISPER_SAMPLE_RATE)
@@ -465,7 +458,7 @@ def transcribe_audio(audio_data):
         cmd = [
             str(WHISPER_BINARY),
             "-m", str(WHISPER_MODEL),
-            "-f", wav_path,
+            "-f", str(wav_path),
             "--no-timestamps",
             "--language", "en",
             "--threads", "4",
@@ -525,6 +518,13 @@ def transcribe_audio(audio_data):
     except Exception as e:
         # log.error(f"Transcription exception: {e}", exc_info=True)
         return None
+    finally:
+        try:
+            wav_path.unlink()
+        except FileNotFoundError:
+            pass
+        except Exception:
+            pass
 
 
 # =============================================================================
@@ -1104,6 +1104,12 @@ def type_text(text, on_finished=None):
 
 class VoiceTyperWindow(Gtk.ApplicationWindow):
     """Simple dialog window for voice typing control."""
+
+    PHASE_CSS_CLASSES = {
+        'speech-detected': 'phase-speech',
+        'transcribing': 'phase-transcribing',
+        'typing': 'phase-typing',
+    }
     
     def __init__(self, app):
         super().__init__(application=app)
@@ -1111,6 +1117,7 @@ class VoiceTyperWindow(Gtk.ApplicationWindow):
         self.recorder = None
         self.is_recording = False
         self.config = load_config()
+        self._active_phase_class = None
         
         # Window setup - small dialog with title bar (draggable)
         self.set_title("Lingo")
@@ -1150,6 +1157,7 @@ class VoiceTyperWindow(Gtk.ApplicationWindow):
         
         # Store reference to main container for processing state styling
         self.main_container = vbox
+        self._active_phase_class = None
         
         # Add CSS for styling
         css_provider = Gtk.CssProvider()
@@ -1157,8 +1165,15 @@ class VoiceTyperWindow(Gtk.ApplicationWindow):
             window {
                 background: @theme_bg_color;
             }
-            window.processing {
+            window.phase-speech {
+                background: #27AE60;
+            }
+            window.phase-transcribing {
                 background: #E67E22;
+            }
+            window.phase-typing {
+                background: #FFFFFF;
+                color: #000000;
             }
             combobox {
                 font-size: 20px;
@@ -1197,10 +1212,27 @@ class VoiceTyperWindow(Gtk.ApplicationWindow):
         # Show orange background to indicate initialization in progress
         GLib.idle_add(self._auto_start_microphone)
     
+    def _set_background_phase(self, phase):
+        """Update the window background based on the current processing phase."""
+        target_class = self.PHASE_CSS_CLASSES.get(phase)
+        if phase in (None, 'idle'):
+            target_class = None
+
+        if self._active_phase_class == target_class:
+            return
+
+        if self._active_phase_class:
+            self.remove_css_class(self._active_phase_class)
+            self._active_phase_class = None
+
+        if target_class:
+            self.add_css_class(target_class)
+            self._active_phase_class = target_class
+
     def _auto_start_microphone(self):
         """Auto-start the microphone when the application launches."""
-        # Show orange background to indicate we're initializing
-        self.add_css_class('processing')
+        # Show orange background (same as transcribing phase) while initializing
+        self._set_background_phase('transcribing')
         
         # Small delay to let the UI render the orange background first
         GLib.timeout_add(100, self._complete_auto_start)
@@ -1211,9 +1243,8 @@ class VoiceTyperWindow(Gtk.ApplicationWindow):
         # Check the mic checkbox (this triggers _activate_microphone via on_mic_toggled)
         self.mic_checkbox.set_active(True)
         
-        # Remove the initialization orange background
-        # (it will turn orange again if processing speech)
-        self.remove_css_class('processing')
+        # Remove the initialization background and let live phases drive the color
+        self._set_background_phase('idle')
         return False  # Don't repeat timeout
     
     def _populate_mic_dropdown(self):
@@ -1282,7 +1313,7 @@ class VoiceTyperWindow(Gtk.ApplicationWindow):
         self.recorder = AudioRecorder(
             self.on_speech_detected,
             audio_device=audio_device,
-            on_processing_state_changed=self.on_processing_state_changed
+            on_processing_phase_changed=self.on_processing_phase_changed
         )
         success, error_msg = self.recorder.start()
         
@@ -1336,16 +1367,14 @@ class VoiceTyperWindow(Gtk.ApplicationWindow):
         # log.info("Recording stopped.")
         print("🔇 Microphone OFF")
     
-    def on_processing_state_changed(self, is_processing):
-        """Called when whisper processing state changes."""
-        if is_processing:
-            # Turn background orange while processing
-            self.add_css_class('processing')
-            log.debug("Processing started - background orange")
+    def on_processing_phase_changed(self, phase):
+        """Called when the recorder reports a processing phase change."""
+        if phase in self.PHASE_CSS_CLASSES:
+            self._set_background_phase(phase)
+            log.debug(f"Processing phase active: {phase}")
         else:
-            # Restore default background
-            self.remove_css_class('processing')
-            log.debug("Processing complete - background restored")
+            self._set_background_phase('idle')
+            log.debug("Processing phase active: idle")
         return False  # Don't repeat (for GLib.idle_add)
 
     def on_speech_detected(self, text, completion_callback=None):
@@ -1360,7 +1389,7 @@ class VoiceTyperWindow(Gtk.ApplicationWindow):
 
     def _on_typing_finished(self):
         """Reset processing indicator after typing completes."""
-        self.on_processing_state_changed(False)
+        self.on_processing_phase_changed('idle')
     
     def on_close_request(self, window):
         """Clean up when window closes."""
