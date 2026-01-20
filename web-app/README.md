@@ -1,5 +1,12 @@
 # Lingo 2.0 (Whisper-enabled Version) 🗣️
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE.md)
+[![Vanilla_JS](https://img.shields.io/badge/Vanilla_JS-F7DF1E?logo=javascript&logoColor=black)](web-app/lingo.js)
+[![Framework_Free](https://img.shields.io/badge/Framework_Free-brightgreen)](web-app/README.md)
+[![Local AI](https://img.shields.io/badge/Local_AI-whisper--cpp-ff6600)](whisper-model/whisper.cpp/README.md)
+
+Local speech-to-text powered by [whisper.cpp](https://github.com/ggerganov/whisper.cpp). No cloud APIs, no costs, complete privacy.
+
 The "2.0" version of Lingo uses Whisper instead of Google Speech API for voice input. If you want the pure JavaScript-based Speech version of this app use Lingo instead of Lingo2. Both are on Github.
 
 A powerful web application for text-to-speech (TTS) and speech-to-text (STT) functionality. Lingo provides an intuitive interface for reading text aloud and converting speech to text. **Speech recognition is powered by [whisper.cpp](https://github.com/ggerganov/whisper.cpp)** - OpenAI's Whisper model running 100% locally on your machine. No cloud APIs, no costs, complete privacy!
