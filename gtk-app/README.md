@@ -32,6 +32,7 @@ cd /path/to/lingo2
 
 ```bash
 cd gtk-app
+./setup.sh
 ./run.sh
 ```
 The first run will create a virtual environment and install Python dependencies.

@@ -144,32 +144,10 @@ Browser (web-app/lingo.html/js)  →  HTTP POST (audio blob)  →  FastAPI Serve
 - **Web Audio API**: Silence detection via AudioContext/AnalyserNode
 - **localStorage**: Persistent settings
 
-## 📁 Project Structure
-
-```
-lingo2/
-├── setup-whisper.sh        # Setup script: clones/builds whisper.cpp
-├── whisper-model/          # Created by setup-whisper.sh
-│   └── whisper.cpp/        # whisper.cpp repo with binary and models
-├── web-app/                # Web application
-│   ├── lingo.html          # Main HTML structure
-│   ├── lingo.css           # Styles and theming  
-│   ├── lingo.js            # Frontend: audio capture, silence detection, UI
-│   ├── whisper_server.py   # FastAPI server: audio conversion + whisper.cpp
-│   ├── run.sh              # Startup script: creates venv, starts server
-│   ├── kill.sh             # Stop the local server
-│   └── .venv/              # Python virtual environment (created by run.sh)
-├── gtk-app/                # GTK desktop application (coming soon)
-└── README.md               # This documentation
-```
-
 ## 🔧 The Scripts
 
 ### `setup-whisper.sh` (project root)
-One-time setup that:
-1. Clones the whisper.cpp repository
-2. Builds the whisper-cli binary using cmake
-3. Downloads the `base.en` model (~150MB)
+See repository root README.md for instructions on setting up whisper.
 
 ### `web-app/run.sh`
 Starts the web application:
@@ -180,64 +158,6 @@ Starts the web application:
 
 ### `web-app/kill.sh`
 Stops any running server on port 8009.
-
-## 🧠 Upgrading the AI Model
-
-This project uses the `base.en` model by default, which offers a good balance of speed and accuracy. If you need better accuracy (at the cost of speed) or faster performance (at the cost of accuracy), you can switch to a different model.
-
-### Available Models
-
-| Model | Size | Speed | Accuracy | Best For |
-|-------|------|-------|----------|----------|
-| `tiny.en` | ~75MB | Fastest | Decent | Quick testing, low-powered devices |
-| `base.en` | ~150MB | Fast | Good | ⭐ **Default** - good balance |
-| `small.en` | ~500MB | Medium | Better | Improved accuracy without too much slowdown |
-| `medium.en` | ~1.5GB | Slower | Great | High accuracy needs |
-| `large` | ~3GB | Slowest | Best | Maximum accuracy, multilingual |
-
-> **Note**: The `.en` suffix means English-only models, which are smaller and faster. The `large` model is multilingual (no `.en` variant).
-
-### How to Switch Models
-
-You need to edit **two files**:
-
-#### 1. `setup-whisper.sh` (line ~91)
-
-Change the model name in the download command:
-
-```bash
-# Change from:
-./models/download-ggml-model.sh base.en
-
-# To (for example, small.en):
-./models/download-ggml-model.sh small.en
-```
-
-#### 2. `web-app/whisper_server.py` (line ~35)
-
-Update the model path to match:
-
-```python
-# Change from:
-WHISPER_MODEL = WHISPER_DIR / "whisper.cpp" / "models" / "ggml-base.en.bin"
-
-# To (for example, small.en):
-WHISPER_MODEL = WHISPER_DIR / "whisper.cpp" / "models" / "ggml-small.en.bin"
-```
-
-#### 3. Re-run setup and restart
-
-```bash
-# Download the new model
-./setup-whisper.sh
-
-# Restart the server
-cd web-app
-./kill.sh
-./run.sh
-```
-
-> **Tip**: You can have multiple models downloaded. Just change `whisper_server.py` to switch between them without re-downloading.
 
 ## 🎯 Use Cases
 

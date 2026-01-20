@@ -25,6 +25,68 @@ This mono-repo contains two applications that provide different ways to use whis
 
 Both projects share the same whisper.cpp engine located in `whisper-model/`.
 
+## 🔧 First setup Whisper AI
+
+### `setup-whisper.sh` (project root)
+One-time setup that:
+1. Clones the whisper.cpp repository
+2. Builds the whisper-cli binary using cmake
+3. Downloads the `base.en` model (~150MB)
+
+## 🧠 Upgrading the AI Model
+
+This project uses the `base.en` model by default, which offers a good balance of speed and accuracy. If you need better accuracy (at the cost of speed) or faster performance (at the cost of accuracy), you can switch to a different model.
+
+### Available Models
+
+| Model | Size | Speed | Accuracy | Best For |
+|-------|------|-------|----------|----------|
+| `tiny.en` | ~75MB | Fastest | Decent | Quick testing, low-powered devices |
+| `base.en` | ~150MB | Fast | Good | ⭐ **Default** - good balance |
+| `small.en` | ~500MB | Medium | Better | Improved accuracy without too much slowdown |
+| `medium.en` | ~1.5GB | Slower | Great | High accuracy needs |
+| `large` | ~3GB | Slowest | Best | Maximum accuracy, multilingual |
+
+> **Note**: The `.en` suffix means English-only models, which are smaller and faster. The `large` model is multilingual (no `.en` variant).
+
+### How to Switch Models
+
+You need to edit **two files**:
+
+#### 1. `setup-whisper.sh` (line ~91)
+
+Change the model name in the download command:
+
+```bash
+# Change from:
+./models/download-ggml-model.sh base.en
+
+# To (for example, small.en):
+./models/download-ggml-model.sh small.en
+```
+
+#### 2. Set Python Variable
+
+Both the 'gtk-app' and the 'web-app' have this same variable definition which tells it which whisper model to use.
+
+```python
+# Change from:
+WHISPER_MODEL = WHISPER_DIR / "whisper.cpp" / "models" / "ggml-base.en.bin"
+
+# To (for example, small.en):
+WHISPER_MODEL = WHISPER_DIR / "whisper.cpp" / "models" / "ggml-small.en.bin"
+```
+
+#### 3. Re-run whisper setup and restart
+
+```bash
+# Download the new model
+./setup-whisper.sh
+```
+Next you can restart the app.
+
+> **Tip**: You can have multiple models downloaded. Just change `whisper_server.py` to switch between them without re-downloading.
+
 ## Quick Start
 
 1. **Build whisper.cpp and download the model:**
