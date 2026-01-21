@@ -72,6 +72,7 @@ DTYPE = np.int16
 DEFAULT_SILENCE_THRESHOLD = 0.005  # RMS level below this is silence (raised to filter electrical spikes)
 SILENCE_DURATION_S = 1.0  # Seconds of silence before transcription
 MIN_AUDIO_DURATION_S = 0.5  # Minimum audio length to process
+MIN_VOICED_DURATION_S = 0.5  # Minimum time above threshold to process
 SPEECH_CONFIRM_CHUNKS = 3  # Require this many consecutive above-threshold chunks to confirm speech
 
 # =============================================================================
@@ -154,6 +155,7 @@ class AudioRecorder:
         self.recording_start_time = None
         self.speech_detected = False  # Track if we've heard speech above threshold
         self.speech_confirm_count = 0  # Counter for consecutive above-threshold chunks
+        self.voiced_frames = 0  # Count of frames above threshold
         self.stream = None
         self.lock = threading.RLock()
         self.current_phase = 'idle'
@@ -171,6 +173,7 @@ class AudioRecorder:
         self.recording_start_time = time.time()
         self.speech_detected = False
         self.current_phase = 'idle'
+        self.voiced_frames = 0
         
         # Find the audio device by name
         device = None
@@ -273,16 +276,27 @@ class AudioRecorder:
                 elif now - self.silence_start_time >= SILENCE_DURATION_S:
                     # We've had enough silence - process if we have audio AND speech was detected
                     audio_duration = now - self.recording_start_time
+                    voiced_duration_s = self.voiced_frames / RECORD_SAMPLE_RATE
                     
-                    if len(self.audio_buffer) > 0 and audio_duration >= MIN_AUDIO_DURATION_S and self.speech_detected:
+                    if (
+                        len(self.audio_buffer) > 0
+                        and audio_duration >= MIN_AUDIO_DURATION_S
+                        and voiced_duration_s >= MIN_VOICED_DURATION_S
+                        and self.speech_detected
+                    ):
                         # Grab the audio and reset
                         audio_data = np.concatenate(self.audio_buffer)
-                        log.info(f">>> TRIGGERING WHISPER: {len(audio_data)} samples ({len(audio_data)/RECORD_SAMPLE_RATE:.2f}s), peak_rms={self.peak_rms:.6f}")
+                        log.info(
+                            ">>> TRIGGERING WHISPER: "
+                            f"{len(audio_data)} samples ({len(audio_data)/RECORD_SAMPLE_RATE:.2f}s), "
+                            f"voiced={voiced_duration_s:.2f}s, peak_rms={self.peak_rms:.6f}"
+                        )
                         self.audio_buffer = []
                         self.recording_start_time = now
                         self.silence_start_time = None
                         self.speech_detected = False  # Reset for next utterance
                         self.speech_confirm_count = 0  # Reset confirmation counter
+                        self.voiced_frames = 0  # Reset voiced frames
                         self.peak_rms = 0.0  # Reset peak for next utterance
                         
                         # Trigger transcription in separate thread
@@ -298,6 +312,7 @@ class AudioRecorder:
                         self.silence_start_time = None
                         self.speech_detected = False
                         self.speech_confirm_count = 0  # Reset confirmation counter
+                        self.voiced_frames = 0  # Reset voiced frames
                         self.peak_rms = 0.0  # Reset peak
                         if self.current_phase == 'speech-detected':
                             self._transition_to_phase('idle')
@@ -307,6 +322,7 @@ class AudioRecorder:
                 if self.current_phase in ('idle', 'speech-detected'):
                     self._transition_to_phase('speech-detected')
                 self.speech_confirm_count += 1
+                self.voiced_frames += frames
                 
                 if not self.speech_detected and self.speech_confirm_count >= SPEECH_CONFIRM_CHUNKS:
                     # Confirmed speech - multiple consecutive chunks above threshold
