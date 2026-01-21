@@ -72,7 +72,7 @@ DTYPE = np.int16
 DEFAULT_SILENCE_THRESHOLD = 0.005  # RMS level below this is silence (raised to filter electrical spikes)
 SILENCE_DURATION_S = 1.0  # Seconds of silence before transcription
 MIN_AUDIO_DURATION_S = 0.5  # Minimum audio length to process
-MIN_VOICED_DURATION_S = 0.5  # Minimum time above threshold to process
+MIN_VOICED_DURATION_S = 0.2  # Minimum time above threshold to process
 SPEECH_CONFIRM_CHUNKS = 3  # Require this many consecutive above-threshold chunks to confirm speech
 
 # =============================================================================
