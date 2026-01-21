@@ -119,11 +119,12 @@ def save_config(config):
     except Exception as e:
         log.error(f"Failed to save config: {e}")
 
-def get_input_devices():
+def get_input_devices(rescan=False):
     """Get list of available audio input devices."""
     # Force PortAudio to re-scan devices (catches hot-plugged USB mics)
-    sd._terminate()
-    sd._initialize()
+    if rescan:
+        sd._terminate()
+        sd._initialize()
     
     devices = sd.query_devices()
     input_devices = []
@@ -175,10 +176,6 @@ class AudioRecorder:
         device = None
         device_not_found = False
         if self.audio_device:
-            # Force PortAudio to re-scan devices
-            sd._terminate()
-            sd._initialize()
-            
             devices = sd.query_devices()
             for i, d in enumerate(devices):
                 if d['name'] == self.audio_device and d['max_input_channels'] > 0:
@@ -1396,8 +1393,8 @@ class VoiceTyperWindow(Gtk.ApplicationWindow):
         # Add "System Default" as first option
         self.mic_dropdown.append_text("System Default")
         
-        # Add all input devices
-        self.input_devices = get_input_devices()
+        # Add all input devices (rescan only at startup)
+        self.input_devices = get_input_devices(rescan=True)
         for device in self.input_devices:
             self.mic_dropdown.append_text(device['name'])
         
