@@ -1192,13 +1192,7 @@ class VoiceTyperWindow(Gtk.ApplicationWindow):
         vbox.set_margin_bottom(10)
         vbox.set_margin_start(15)
         vbox.set_margin_end(15)
-        
-        # Create microphone dropdown
-        self.mic_dropdown = Gtk.ComboBoxText()
-        self._populate_mic_dropdown()
-        self.mic_dropdown.connect("changed", self.on_mic_changed)
-        vbox.append(self.mic_dropdown)
-        
+
         # Create horizontal box for checkbox and close button
         hbox = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
         
@@ -1298,7 +1292,7 @@ class VoiceTyperWindow(Gtk.ApplicationWindow):
             self._active_phase_class = target_class
 
     def _create_advanced_settings_section(self):
-        expander = Gtk.Expander(label="Advanced Settings")
+        expander = Gtk.Expander(label="Settings")
         expander.set_expanded(False)
         expander.set_hexpand(True)
 
@@ -1307,6 +1301,18 @@ class VoiceTyperWindow(Gtk.ApplicationWindow):
         container.set_margin_start(4)
         container.set_margin_end(4)
         container.set_margin_bottom(4)
+
+        # Microphone device dropdown
+        mic_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        mic_label = Gtk.Label(label="Input device", xalign=0)
+        mic_label.set_hexpand(True)
+        mic_row.append(mic_label)
+
+        self.mic_dropdown = Gtk.ComboBoxText()
+        self._populate_mic_dropdown()
+        self.mic_dropdown.connect("changed", self.on_mic_changed)
+        mic_row.append(self.mic_dropdown)
+        container.append(mic_row)
 
         threshold_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         threshold_label = Gtk.Label(label="Silence threshold", xalign=0)
