@@ -55,6 +55,10 @@ WHISPER_MODEL = WHISPER_DIR / "whisper.cpp" / "models" / "ggml-base.en.bin"
 WHISPER_LIB_DIR = WHISPER_DIR / "whisper.cpp" / "build" / "src"  # For libwhisper.so
 GGML_LIB_DIR = WHISPER_DIR / "whisper.cpp" / "build" / "ggml" / "src"  # For libggml.so
 
+# RAM_CACHE: Use /dev/shm (tmpfs in RAM) instead of /tmp for audio files
+# Setting this to True avoids disk I/O and reduces SSD wear
+RAM_CACHE = True
+
 # Audio settings
 # Recording at 48kHz (common USB mic rate), will resample to 16kHz for whisper
 RECORD_SAMPLE_RATE = 48000  # Rate to record from microphone
@@ -447,10 +451,12 @@ def transcribe_audio(audio_data):
     
     # Normalize audio to use more dynamic range (helps whisper with quiet audio)
     audio_data = normalize_audio(audio_data)
-    
+
     # Write audio to a unique temporary WAV file (kept only during processing)
+    # Use /dev/shm (RAM) if RAM_CACHE is enabled, otherwise use /tmp
     timestamp_ms = int(time.time() * 1000)
-    wav_path = Path("/tmp") / f"voice_typer_{timestamp_ms}_{threading.get_ident()}.wav"
+    temp_dir = Path("/dev/shm") if RAM_CACHE else Path("/tmp")
+    wav_path = temp_dir / f"lingo2_data_{timestamp_ms}_{threading.get_ident()}.wav"
     
     # log.debug(f"Writing audio to file: {wav_path}")
     
@@ -539,6 +545,35 @@ def transcribe_audio(audio_data):
             pass
         except Exception:
             pass
+
+
+def cleanup_temp_audio_files():
+    """
+    Clean up temporary audio files created by previous runs.
+
+    Removes all files matching the pattern lingo2_data_* from the
+    temporary directory (either /dev/shm or /tmp depending on RAM_CACHE).
+    """
+    temp_dir = Path("/dev/shm") if RAM_CACHE else Path("/tmp")
+    pattern = "lingo2_data_*"
+
+    try:
+        # Find all matching files
+        files_to_remove = list(temp_dir.glob(pattern))
+
+        if files_to_remove:
+            log.info(f"Cleaning up {len(files_to_remove)} temporary audio file(s) from {temp_dir}")
+            for file_path in files_to_remove:
+                try:
+                    file_path.unlink()
+                    log.debug(f"Removed: {file_path}")
+                except Exception as e:
+                    log.warning(f"Failed to remove {file_path}: {e}")
+        else:
+            log.debug(f"No temporary audio files to clean up in {temp_dir}")
+
+    except Exception as e:
+        log.error(f"Error during cleanup: {e}")
 
 
 # =============================================================================
@@ -1504,13 +1539,16 @@ class VoiceTyperWindow(Gtk.ApplicationWindow):
     def on_close_request(self, window):
         """Clean up when window closes."""
         self.stop_recording()
-        
+
         # Clean up keyboard injector
         global _keyboard_injector
         if _keyboard_injector:
             _keyboard_injector.close()
             _keyboard_injector = None
-        
+
+        # Clean up temporary audio files
+        cleanup_temp_audio_files()
+
         return False  # Allow close
 
 
@@ -1568,7 +1606,10 @@ def main():
         return 1
     
     print("✅ All dependencies found. Starting application...")
-    
+
+    # Clean up any temporary audio files from previous runs
+    cleanup_temp_audio_files()
+
     # Run the GTK application
     app = VoiceTyperApp()
     return app.run(None)
