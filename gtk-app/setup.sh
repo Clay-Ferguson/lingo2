@@ -131,7 +131,8 @@ cat > "$DESKTOP_DIR/$APP_ID.desktop" << EOF
 [Desktop Entry]
 Name=Lingo Voice Typer
 Comment=System-wide voice-to-text input
-Exec=python3 $SCRIPT_DIR/voice_typer.py
+Exec=$SCRIPT_DIR/run.sh
+Path=$SCRIPT_DIR
 Icon=$SCRIPT_DIR/lingo-logo.png
 Terminal=false
 Type=Application
