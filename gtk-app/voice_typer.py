@@ -1197,7 +1197,7 @@ class VoiceTyperWindow(Gtk.ApplicationWindow):
         hbox = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
         
         # Create "Microphone" checkbox
-        self.mic_checkbox = Gtk.CheckButton(label="Microphone")
+        self.mic_checkbox = Gtk.CheckButton(label="Mic")
         self.mic_checkbox.connect("toggled", self.on_mic_toggled)
         hbox.append(self.mic_checkbox)
         
