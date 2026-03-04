@@ -75,6 +75,10 @@ MIN_AUDIO_DURATION_S = 0.5  # Minimum audio length to process
 MIN_VOICED_DURATION_S = 0.2  # Minimum time above threshold to process
 SPEECH_CONFIRM_CHUNKS = 3  # Require this many consecutive above-threshold chunks to confirm speech
 
+# Auto-off: automatically disable the microphone after this many seconds of
+# inactivity (no successful transcription sent to the keyboard).
+DEFAULT_MIC_AUTO_OFF_TIMEOUT_S = 30
+
 # =============================================================================
 # Configuration Management
 # =============================================================================
@@ -86,6 +90,7 @@ DEFAULT_CONFIG = {
     "audio_device": None,  # None means system default
     "portal_restore_token": None,  # Saved token for XDG Remote Desktop Portal session persistence
     "silence_threshold": DEFAULT_SILENCE_THRESHOLD,
+    "mic_auto_off_timeout": DEFAULT_MIC_AUTO_OFF_TIMEOUT_S,
 }
 
 def load_config():
@@ -105,6 +110,10 @@ def load_config():
             config["silence_threshold"] = float(config.get("silence_threshold", DEFAULT_SILENCE_THRESHOLD))
         except (TypeError, ValueError):
             config["silence_threshold"] = DEFAULT_SILENCE_THRESHOLD
+        try:
+            config["mic_auto_off_timeout"] = int(config.get("mic_auto_off_timeout", DEFAULT_MIC_AUTO_OFF_TIMEOUT_S))
+        except (TypeError, ValueError):
+            config["mic_auto_off_timeout"] = DEFAULT_MIC_AUTO_OFF_TIMEOUT_S
         return config
     except Exception as e:
         log.error(f"Failed to load config: {e}")
@@ -1180,6 +1189,10 @@ class VoiceTyperWindow(Gtk.ApplicationWindow):
         self.is_recording = False
         self.config = load_config()
         self._active_phase_class = None
+
+        # Auto-off timer state
+        self._last_audio_detection_time = None   # timestamp of last successful transcription
+        self._auto_off_timer_id = None           # GLib timeout source id
         
         # Window setup - small dialog with title bar (draggable)
         self.set_title("Lingo")
@@ -1343,6 +1356,35 @@ class VoiceTyperWindow(Gtk.ApplicationWindow):
         help_label.add_css_class("help-text")
         container.append(help_label)
 
+        # Auto-off timeout
+        auto_off_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        auto_off_label = Gtk.Label(label="Auto-off timeout (s)", xalign=0)
+        auto_off_label.set_hexpand(True)
+        auto_off_row.append(auto_off_label)
+
+        self.auto_off_entry = Gtk.Entry()
+        self.auto_off_entry.set_width_chars(6)
+        self.auto_off_entry.set_max_length(6)
+        self.auto_off_entry.set_input_purpose(Gtk.InputPurpose.NUMBER)
+        self.auto_off_entry.set_tooltip_text("Seconds of inactivity before the microphone turns off automatically. 0 to disable.")
+        self.auto_off_entry.set_text(str(self._get_auto_off_timeout()))
+        self.auto_off_entry.connect("activate", self.on_auto_off_entry_activate)
+
+        auto_off_focus = Gtk.EventControllerFocus()
+        auto_off_focus.connect("leave", self.on_auto_off_entry_focus_leave)
+        self.auto_off_entry.add_controller(auto_off_focus)
+
+        auto_off_row.append(self.auto_off_entry)
+        container.append(auto_off_row)
+
+        auto_off_help = Gtk.Label(
+            label="Automatically turn off the microphone after this many seconds without a successful transcription. Set to 0 to disable auto-off.",
+            xalign=0
+        )
+        auto_off_help.set_wrap(True)
+        auto_off_help.add_css_class("help-text")
+        container.append(auto_off_help)
+
         expander.set_child(container)
         return expander
 
@@ -1391,6 +1433,48 @@ class VoiceTyperWindow(Gtk.ApplicationWindow):
 
     def on_threshold_entry_focus_leave(self, controller):
         self._commit_threshold_entry()
+
+    # --- Auto-off timeout helpers ---
+
+    def _get_auto_off_timeout(self):
+        return int(self.config.get('mic_auto_off_timeout', DEFAULT_MIC_AUTO_OFF_TIMEOUT_S))
+
+    def _commit_auto_off_entry(self):
+        text = self.auto_off_entry.get_text().strip()
+        if not text:
+            self.auto_off_entry.set_text(str(self._get_auto_off_timeout()))
+            return
+        try:
+            value = int(text)
+        except ValueError:
+            print("⚠️  Auto-off timeout must be an integer.")
+            self.auto_off_entry.set_text(str(self._get_auto_off_timeout()))
+            return
+        if value < 0:
+            print("⚠️  Auto-off timeout must be 0 or positive.")
+            self.auto_off_entry.set_text(str(self._get_auto_off_timeout()))
+            return
+        self._update_auto_off_timeout(value)
+
+    def _update_auto_off_timeout(self, value):
+        value = int(value)
+        current = self._get_auto_off_timeout()
+        if current == value:
+            self.auto_off_entry.set_text(str(value))
+            return
+        self.config['mic_auto_off_timeout'] = value
+        save_config(self.config)
+        self.auto_off_entry.set_text(str(value))
+        if value == 0:
+            print("⏱️  Mic auto-off disabled")
+        else:
+            print(f"⏱️  Mic auto-off timeout set to {value}s")
+
+    def on_auto_off_entry_activate(self, entry):
+        self._commit_auto_off_entry()
+
+    def on_auto_off_entry_focus_leave(self, controller):
+        self._commit_auto_off_entry()
 
     def _auto_start_microphone(self):
         """Auto-start the microphone when the application launches."""
@@ -1490,6 +1574,9 @@ class VoiceTyperWindow(Gtk.ApplicationWindow):
         
         self.is_recording = True
         print("🎤 Microphone ON - listening...")
+
+        # Start the auto-off inactivity timer
+        self._start_auto_off_timer()
         
         # Initialize keyboard injector (triggers permission dialog on first use)
         injector = get_keyboard_injector()
@@ -1528,6 +1615,10 @@ class VoiceTyperWindow(Gtk.ApplicationWindow):
         if self.recorder:
             self.recorder.stop()
             self.recorder = None
+
+        # Stop the auto-off inactivity timer
+        self._stop_auto_off_timer()
+
         # log.info("Recording stopped.")
         print("🔇 Microphone OFF")
     
@@ -1544,6 +1635,11 @@ class VoiceTyperWindow(Gtk.ApplicationWindow):
     def on_speech_detected(self, text, completion_callback=None):
         """Called when speech is transcribed."""
         # log.info(f"on_speech_detected callback called with: '{text}'")
+
+        # Record the timestamp of this successful transcription so the
+        # auto-off timer knows we are still actively using the microphone.
+        self._last_audio_detection_time = time.time()
+
         finished_cb = completion_callback or self._on_typing_finished
         try:
             type_text(text, on_finished=finished_cb)
@@ -1554,6 +1650,47 @@ class VoiceTyperWindow(Gtk.ApplicationWindow):
     def _on_typing_finished(self):
         """Reset processing indicator after typing completes."""
         self.on_processing_phase_changed('idle')
+
+    # -----------------------------------------------------------------
+    # Auto-off inactivity timer
+    # -----------------------------------------------------------------
+
+    def _start_auto_off_timer(self):
+        """Start a periodic timer that checks for microphone inactivity."""
+        self._stop_auto_off_timer()  # ensure no duplicate timer
+        self._last_audio_detection_time = time.time()  # reset baseline
+        # Check every second; lightweight and accurate enough for a 30s window
+        self._auto_off_timer_id = GLib.timeout_add_seconds(1, self._check_auto_off)
+        log.debug("Auto-off inactivity timer started")
+
+    def _stop_auto_off_timer(self):
+        """Cancel the auto-off timer if running."""
+        if self._auto_off_timer_id is not None:
+            GLib.source_remove(self._auto_off_timer_id)
+            self._auto_off_timer_id = None
+            log.debug("Auto-off inactivity timer stopped")
+
+    def _check_auto_off(self):
+        """Periodic callback: disable mic if idle longer than MIC_AUTO_OFF_TIMEOUT_S."""
+        if not self.is_recording:
+            # Recording already stopped; stop the timer.
+            self._auto_off_timer_id = None
+            return False  # removes the GLib timeout
+
+        timeout = self._get_auto_off_timeout()
+        if timeout <= 0:
+            return True  # auto-off disabled, keep timer running (in case user re-enables)
+
+        elapsed = time.time() - (self._last_audio_detection_time or 0)
+        if elapsed >= timeout:
+            log.info(f"Mic auto-off: no transcription for {elapsed:.0f}s (threshold {timeout}s)")
+            print(f"⏱️  Mic auto-off after {timeout}s of inactivity")
+            # Uncheck the checkbox – this triggers on_mic_toggled → stop_recording
+            self.mic_checkbox.set_active(False)
+            self._auto_off_timer_id = None
+            return False  # removes the GLib timeout
+
+        return True  # keep the timer running
     
     def on_close_request(self, window):
         """Clean up when window closes."""
