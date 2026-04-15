@@ -1620,7 +1620,7 @@ class VoiceTyperWindow(Gtk.ApplicationWindow):
     
     def _show_mic_error(self, message):
         """Show a warning dialog about microphone issues."""
-        dialog = Gtk.MessageDialog(
+        dialog = Gtk.AlertDialog(
             transient_for=self,
             modal=True,
             message_type=Gtk.MessageType.WARNING,
