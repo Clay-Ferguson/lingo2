@@ -26,6 +26,7 @@ import os
 import logging
 from pathlib import Path
 import yaml
+import shutil
 
 # =============================================================================
 # Logging Setup
@@ -674,7 +675,7 @@ import random
 import string
 
 
-class KeyboardInjector:
+class WaylandPortalKeyboardInjector:
     """
     Handles keyboard injection via the XDG Remote Desktop Portal.
     
@@ -1139,15 +1140,48 @@ class KeyboardInjector:
         self._initialized = False
 
 
+class X11KeyboardInjector:
+    def __init__(self):
+        self._initialized = False
+        self._initializing = False
+
+    def initialize(self, callback=None):
+        xdotool_path = shutil.which("xdotool")
+        if not xdotool_path:
+            print("⚠️  Cannot type on X11 because 'xdotool' is missing.")
+            if callback:
+                callback(False)
+        else:
+            if callback:
+                callback(True)
+
+    def type_text(self, text, on_finished=None):
+        try:
+            subprocess.run(
+                ["xdotool", "type", "--delay", "1", "--clearmodifiers", text],
+                check=True
+            )
+        except Exception:
+            pass
+        finally:
+            if on_finished:
+                on_finished()
+
+    def close(self):
+        self._initialized = False
+
 # Global keyboard injector instance
 _keyboard_injector = None
-
 
 def get_keyboard_injector():
     """Get or create the global keyboard injector instance."""
     global _keyboard_injector
     if _keyboard_injector is None:
-        _keyboard_injector = KeyboardInjector()
+        session_type = os.environ.get("XDG_SESSION_TYPE", "").lower()
+        if session_type == "x11":
+            _keyboard_injector = X11KeyboardInjector()
+        else:
+            _keyboard_injector = WaylandPortalKeyboardInjector()
     return _keyboard_injector
 
 
