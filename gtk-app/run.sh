@@ -1,37 +1,13 @@
 #!/bin/bash
-# Start Voice Typer GTK application
-#
-# Automatically checks/repairs the virtual environment if needed.
-
+# Start Voice Typer GTK application via uv.
 set -e
+cd "$(dirname "${BASH_SOURCE[0]}")"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR"
-
-VENV_DIR=".venv"
-
-# Quick check: can we import the required modules?
-check_env() {
-    "$VENV_DIR/bin/python" -c "import numpy, sounddevice, gi" 2>/dev/null
-}
-
-# Recreate venv with system-site-packages (needed for PyGObject/GTK)
-setup_venv() {
-    echo "🔧 Setting up Python environment..."
-    rm -rf "$VENV_DIR"
-    python3 -m venv --system-site-packages "$VENV_DIR"
-    "$VENV_DIR/bin/pip" install -q -r requirements.txt
-    echo "✅ Environment ready"
-    echo ""
-}
-
-# Check if venv exists and works, otherwise set it up
-if [ ! -d "$VENV_DIR" ] || ! check_env; then
-    setup_venv
+# GTK4 Python bindings (gi) come from system packages, so the venv must be
+# created with --system-site-packages. uv will reuse an existing .venv.
+if [ ! -d .venv ]; then
+    uv venv --system-site-packages
 fi
 
-echo "🎤 Starting Voice Typer..."
-echo "   Click the button or press ESC to close"
-echo ""
-
-"$VENV_DIR/bin/python" voice_typer.py
+uv sync --active
+exec uv run --active voice_typer.py

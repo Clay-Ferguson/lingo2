@@ -92,19 +92,17 @@ if ! ldconfig -p | grep -q libportaudio; then
     exit 1
 fi
 
-# Create virtual environment if needed
-if [ ! -d "$VENV_DIR" ]; then
-    echo "📦 Creating virtual environment..."
-    python3 -m venv "$VENV_DIR" --system-site-packages
+# Ensure uv is installed
+if ! command -v uv &> /dev/null; then
+    echo "📦 Installing uv..."
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+    export PATH="$HOME/.local/bin:$PATH"
 fi
 
-# Activate virtual environment
-source "$VENV_DIR/bin/activate"
-
-# Install/upgrade dependencies
-echo "📦 Installing Python dependencies..."
-pip install -q --upgrade pip
-pip install -q -r requirements.txt
+# Create venv with --system-site-packages (needed for PyGObject/GTK) and sync
+echo "📦 Setting up Python environment with uv..."
+[ -d "$VENV_DIR" ] || uv venv --system-site-packages
+uv sync --active
 
 # Check whisper setup
 WHISPER_BINARY="../whisper-model/whisper.cpp/build/bin/whisper-cli"

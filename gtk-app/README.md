@@ -30,12 +30,48 @@ cd /path/to/lingo2
 
 ## Running the GTK App
 
+This project uses [uv](https://docs.astral.sh/uv/) for Python environment management.
+
+### First-time setup
+
+Install uv (if not already installed):
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+Then install system dependencies (GTK4, PortAudio, ffmpeg) and create the venv:
+
 ```bash
 cd gtk-app
 ./setup.sh
+```
+
+`setup.sh` installs OS-level packages (sudo required) and creates a `.venv`
+with `--system-site-packages` so the system PyGObject/GTK4 bindings are
+visible to the project.
+
+### Running
+
+```bash
 ./run.sh
 ```
-The first run will create a virtual environment and install Python dependencies.
+
+…which is equivalent to:
+
+```bash
+uv sync --active
+uv run --active voice_typer.py
+```
+
+### Adding dependencies
+
+```bash
+uv add <package>
+```
+
+This updates `pyproject.toml` and `uv.lock`. Run `uv sync --active` to
+install on machines that already have a `.venv`.
 
 ## Troubleshooting & Tips
 
