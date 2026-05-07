@@ -2,7 +2,9 @@
 
 Local speech-to-text powered by [whisper.cpp](https://github.com/ggerganov/whisper.cpp). No cloud APIs, no costs, complete privacy.
 
-This Lingo 2.0 project contains both a Web App and a GTK app, both of which use Whisper. The Web App is almost identical to the original [Lingo](https://github.com/Clay-Ferguson/lingo), under this same Github account (by Clay Ferguson), except the oridinal Lingo uses browser-based Speech API (for Voice Input) rather than Whisper.
+This Lingo 2.0 project contains both a Web App and a GTK app, both of which use Whisper, but are *separate* apps. The web app is in folder `web-app` and the GTK app is in the `gtk-app` folder.
+
+The Web App is almost identical to the original [Lingo](https://github.com/Clay-Ferguson/lingo), under this same Github account (by Clay Ferguson), except the oridinal Lingo uses browser-based Speech API (for Voice Input) rather than Whisper.
 
 For browser-based Speech I do recomment `Lingo`, rather than `Lingo 2.0`, just because, if you're already in a browser, there's no reason to use Whisper. 
 

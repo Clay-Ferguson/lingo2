@@ -57,7 +57,10 @@ This project was very intentionally designed to be free of any specific framewor
 Before running Lingo, you need:
 
 - **Linux** (Ubuntu/Debian tested) or macOS
-- **Python 3** with venv support (`sudo apt install python3-venv`)
+- **[uv](https://docs.astral.sh/uv/)** for Python project management. Install with:
+  ```bash
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+  ```
 - **ffmpeg** for audio conversion (`sudo apt install ffmpeg`)
 - **Build tools** for compiling whisper.cpp (`sudo apt install build-essential cmake git`)
 
@@ -83,10 +86,13 @@ Before running Lingo, you need:
    cd web-app
    ./run.sh
    ```
-   This will:
-   - Create a Python virtual environment (first run only)
-   - Install FastAPI and dependencies
-   - Start the server on http://localhost:8009
+   Or run directly with uv:
+   ```bash
+   cd web-app
+   uv sync
+   uv run uvicorn whisper_server:app --host 0.0.0.0 --port 8009 --reload
+   ```
+   `uv sync` creates `.venv/` and installs dependencies from `pyproject.toml` on first run. To add a new dependency: `uv add <package>`.
 
 4. **Open your browser** to http://localhost:8009/lingo.html
 
@@ -150,11 +156,10 @@ Browser (web-app/lingo.html/js)  →  HTTP POST (audio blob)  →  FastAPI Serve
 See repository root README.md for instructions on setting up whisper.
 
 ### `web-app/run.sh`
-Starts the web application:
-1. Creates Python virtual environment (first run)
-2. Installs FastAPI, uvicorn, python-multipart
-3. Kills any existing server on port 8009
-4. Starts the FastAPI server with hot-reload
+Tiny wrapper around `uv` that:
+1. Kills any existing server on port 8009
+2. Runs `uv sync` (creates `.venv` and installs deps from `pyproject.toml` on first run)
+3. Starts the FastAPI server with hot-reload via `uv run uvicorn`
 
 ### `web-app/kill.sh`
 Stops any running server on port 8009.

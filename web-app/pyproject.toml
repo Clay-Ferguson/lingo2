@@ -1,0 +1,13 @@
+[project]
+name = "lingo-web-app"
+version = "0.1.0"
+description = "FastAPI server bridging the browser to whisper.cpp for speech-to-text"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
+    "python-multipart>=0.0.9",
+]
+
+[tool.uv]
+package = false
