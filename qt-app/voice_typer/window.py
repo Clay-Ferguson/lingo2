@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 import time
 
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import QEvent, Qt, QTimer
 from PyQt6.QtWidgets import (QApplication, QCheckBox, QComboBox, QHBoxLayout,
                              QLabel, QLayout, QLineEdit, QMessageBox,
                              QPushButton, QToolButton, QVBoxLayout, QWidget)
@@ -35,6 +35,10 @@ PHASE_COLORS = {
     "transcribing": "#E67E22",
     "typing": "#FFFFFF",
 }
+
+# Width budget for the wrapped help paragraphs, and therefore the width of the
+# expanded window. See _help_label for why this is fixed rather than maximum.
+HELP_TEXT_WIDTH = 340
 
 THRESHOLD_HELP = (
     "Typical range is 0.001–0.02: lower values make the mic more sensitive; "
@@ -217,9 +221,12 @@ class VoiceTyperWindow(QWidget):
         label = QLabel(text)
         label.setObjectName("helpText")
         label.setWordWrap(True)
-        # Wrapped text needs a width budget or the fixed-size layout grows the
-        # window to fit the paragraph on one line.
-        label.setMaximumWidth(360)
+        # Fixed, not maximum. A wrapped label's height is a function of its
+        # width (hasHeightForWidth() is True), so with only a maximum the
+        # window's sizeHint depends on how the layout happens to negotiate
+        # width. Pinning the width makes the required height deterministic,
+        # which is what keeps the window from settling at the wrong height.
+        label.setFixedWidth(HELP_TEXT_WIDTH)
         return label
 
     def _on_settings_toggled(self, expanded: bool) -> None:
@@ -227,6 +234,39 @@ class VoiceTyperWindow(QWidget):
             Qt.ArrowType.DownArrow if expanded else Qt.ArrowType.RightArrow
         )
         self.settings_panel.setVisible(expanded)
+        self._resync_size()
+
+    def _resync_size(self) -> None:
+        """Force the window back to exactly the size its contents need.
+
+        SetFixedSize is supposed to do this on its own, and does when the
+        toggle happens in isolation. It is not reliable when the toggle
+        coincides with the compositor reconfiguring the window -- notably
+        under Wayland, where the click that re-focuses the window is also
+        delivered to the widget under the cursor, so re-focusing by clicking
+        near the Settings button both toggles the panel and triggers a
+        configure. The resize can be lost in that sequence, leaving the window
+        large with the panel hidden (or cramped with it shown).
+
+        Recomputing from the layout and re-asserting the size makes the window
+        and the panel state agree again no matter what order those arrived in.
+        """
+        layout = self.layout()
+        layout.invalidate()
+        layout.activate()
+        self.setFixedSize(self.sizeHint())
+
+    def changeEvent(self, event) -> None:
+        """Re-assert geometry when the window regains focus.
+
+        The compositor can hand back stale geometry on activation, which is
+        the "it looks wrong after I click away and come back" case. Deferred
+        to the next event-loop turn so it runs after Qt has finished applying
+        whatever the compositor sent.
+        """
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.ActivationChange and self.isActiveWindow():
+            QTimer.singleShot(0, self._resync_size)
 
     # -- phase display -----------------------------------------------------
 
