@@ -81,6 +81,11 @@ cd qt-app && ./run.sh   # Launch floating mic button
 - **The RMS silence-detection state machine in `audio.py` is tuned**, not
   arbitrary. Changing the constants or the branch structure causes missed or
   spurious utterances.
+- **`_enforce_size()` re-`resize()`s the window from `resizeEvent`.** Mutter
+  replays a stale size in the configure that comes with focus changes, and Qt
+  applies it instead of clamping to the window's min/max, which collapses the
+  Settings panel and makes the widgets overlap. `setFixedSize()` cannot undo it
+  -- it returns early when the min and max are already correct, which they are.
 - **`sounddevice` is imported lazily**, so a missing PortAudio produces the
   friendly dependency message instead of an import traceback.
 
@@ -125,3 +130,8 @@ if ((evt.ctrlKey || evt.metaKey) && evt.key.toLowerCase() === "x") {
 - System: `portaudio19-dev`, `ffmpeg`, `libxcb-cursor0`, `libxkbcommon-x11-0` (Ubuntu/Debian names)
 - Python (via pyproject.toml/uv): `PyQt6`, `sounddevice`, `numpy`, `PyYAML`
 - Keyboard injection: XDG Remote Desktop Portal via QtDBus (part of PyQt6; no PyGObject)
+
+## Note to AI Agents
+
+Do not ever commit code to the 'git' repo yourself. This is always only done by human developers.
+

@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 import time
 
-from PyQt6.QtCore import QEvent, Qt, QTimer
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import (QApplication, QCheckBox, QComboBox, QHBoxLayout,
                              QLabel, QLayout, QLineEdit, QMessageBox,
                              QPushButton, QToolButton, QVBoxLayout, QWidget)
@@ -234,39 +234,52 @@ class VoiceTyperWindow(QWidget):
             Qt.ArrowType.DownArrow if expanded else Qt.ArrowType.RightArrow
         )
         self.settings_panel.setVisible(expanded)
-        self._resync_size()
-
-    def _resync_size(self) -> None:
-        """Force the window back to exactly the size its contents need.
-
-        SetFixedSize is supposed to do this on its own, and does when the
-        toggle happens in isolation. It is not reliable when the toggle
-        coincides with the compositor reconfiguring the window -- notably
-        under Wayland, where the click that re-focuses the window is also
-        delivered to the widget under the cursor, so re-focusing by clicking
-        near the Settings button both toggles the panel and triggers a
-        configure. The resize can be lost in that sequence, leaving the window
-        large with the panel hidden (or cramped with it shown).
-
-        Recomputing from the layout and re-asserting the size makes the window
-        and the panel state agree again no matter what order those arrived in.
-        """
+        # Resize here rather than leaving it to the layout request Qt posts,
+        # so no compositor event can be processed while the window size and
+        # the panel disagree.
         layout = self.layout()
         layout.invalidate()
         layout.activate()
-        self.setFixedSize(self.sizeHint())
+        self._enforce_size()
 
-    def changeEvent(self, event) -> None:
-        """Re-assert geometry when the window regains focus.
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._enforce_size()
 
-        The compositor can hand back stale geometry on activation, which is
-        the "it looks wrong after I click away and come back" case. Deferred
-        to the next event-loop turn so it runs after Qt has finished applying
-        whatever the compositor sent.
+    def _enforce_size(self) -> None:
+        """Undo any resize the window's own size constraints forbid.
+
+        Wayland compositors reply to a state change -- losing or regaining
+        focus, most visibly -- with a configure event carrying a size. Mutter
+        sends the size it last configured us at, and that size is stale: when
+        Settings expands we resize ourselves, which mutter renders but does
+        not record. So the first click on another window arrives with a
+        configure for the collapsed size.
+
+        Qt applies that size verbatim instead of clamping it to the min/max
+        the window advertised, and the result is the whole reported symptom at
+        once: the window shrinks back to collapsed height, the settings panel
+        is clipped out of view even though the arrow still points down, and
+        the rows above it are squeezed until the Settings button overlaps
+        Close. X11 does not do this, which is why it only shows up on Wayland.
+
+        SetFixedSize keeps minimumSize() == maximumSize() == the size the
+        layout needs, so any other size can only have come from the
+        compositor. Resizing back also teaches mutter the real size, so this
+        corrects once per Settings toggle and then stays quiet.
+
+        This cannot use setFixedSize(): it returns early when neither the
+        minimum nor the maximum changes, which is exactly this case, and that
+        is why re-asserting the constraints alone never fixed it.
         """
-        super().changeEvent(event)
-        if event.type() == QEvent.Type.ActivationChange and self.isActiveWindow():
-            QTimer.singleShot(0, self._resync_size)
+        required = self.minimumSize()
+        if required != self.maximumSize() or self.size() == required:
+            return
+        log.debug(
+            f"Rejecting {self.size().width()}x{self.size().height()} window size; "
+            f"restoring {required.width()}x{required.height()}"
+        )
+        self.resize(required)
 
     # -- phase display -----------------------------------------------------
 
