@@ -1,7 +1,10 @@
 # Whisper model and binaries (built by setup-whisper.sh)
 whisper-model/
 
-# Python virtual environment (created by run.sh)
+# Python virtual environments.
+# Unanchored, so this covers web-app/, qt-app/ and gtk-app/ alike. uv builds
+# qt-app/.venv on every run.sh launch; it is disposable and never committed.
+# uv.lock IS committed - it is the lockfile, not an artifact.
 .venv/
 
 # Python cache
@@ -24,4 +27,12 @@ Thumbs.db
 *~
 
 # Logs
+# Covers qt-app/voice_typer.log and gtk-app/voice_typer.log, both of which are
+# overwritten on every launch.
 *.log
+
+# Transient WAV files written during transcription. These normally live in
+# /dev/shm (see RAM_CACHE in transcribe.py) and are unlinked in a finally
+# block, so they should never appear here - but a hard kill mid-transcription
+# with RAM_CACHE disabled can strand one in the working directory.
+lingo2_data_*.wav

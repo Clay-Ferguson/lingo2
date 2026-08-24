@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=Lingo Voice Typer
+Comment=System-wide voice-to-text input
+Exec=/mnt/projects/lingo2/qt-app/run.sh
+Path=/mnt/projects/lingo2/qt-app
+Icon=/mnt/projects/lingo2/qt-app/lingo-logo.png
+Terminal=false
+Type=Application
+Categories=Utility;Accessibility;
+StartupNotify=false
+StartupWMClass=com.lingo.voicetyper

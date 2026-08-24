@@ -2,15 +2,17 @@
 
 Local speech-to-text powered by [whisper.cpp](https://github.com/ggerganov/whisper.cpp). No cloud APIs, no costs, complete privacy.
 
-This Lingo 2.0 project contains both a Web App and a GTK app, both of which use Whisper, but are *separate* apps. The web app is in folder `web-app` and the GTK app is in the `gtk-app` folder.
+This Lingo 2.0 project contains both a Web App and a desktop app, both of which use Whisper, but are *separate* apps. The web app is in folder `web-app` and the PyQt6 desktop app is in the `qt-app` folder.
+
+The original GTK4 desktop app remains in `gtk-app` as a **deprecated** project. It is no longer developed, but is kept for anyone who needs a GTK build.
 
 The Web App is almost identical to the original [Lingo](https://github.com/Clay-Ferguson/lingo), under this same Github account (by Clay Ferguson), except the oridinal Lingo uses browser-based Speech API (for Voice Input) rather than Whisper.
 
 For browser-based Speech I do recomment `Lingo`, rather than `Lingo 2.0`, just because, if you're already in a browser, there's no reason to use Whisper. 
 
-## GTK App Screenshot
+## Desktop App Screenshot
 
-![](gtk-app/screenshot.png)
+![](qt-app/screenshot.png)
 
 ## Web App Screenshot
 
@@ -18,12 +20,13 @@ For browser-based Speech I do recomment `Lingo`, rather than `Lingo 2.0`, just b
 
 ## Projects
 
-This mono-repo contains two applications that provide different ways to use whisper.cpp for voice input:
+This mono-repo contains the following applications, all providing different ways to use whisper.cpp for voice input:
 
 | Project | Description |
 |---------|-------------|
 | [**web-app**](web-app/README.md) | Browser-based TTS/STT with a FastAPI backend. Access via http://localhost:8009 |
-| [**gtk-app**](gtk-app/README.md) | Linux desktop app for system-wide voice typing. Speaks into any focused application |
+| [**qt-app**](qt-app/README.md) | Linux desktop app (PyQt6) for system-wide voice typing. Speaks into any focused application |
+| [**gtk-app**](gtk-app/README.md) | ⚠️ *Deprecated.* The original GTK4 version of the desktop app, superseded by `qt-app` |
 
 Both projects share the same whisper.cpp engine located in `whisper-model/`.
 
@@ -69,7 +72,7 @@ Change the model name in the download command:
 
 #### 2. Set Python Variable
 
-Both the 'gtk-app' and the 'web-app' have this same variable definition which tells it which whisper model to use.
+Both the 'qt-app' and the 'web-app' have this same variable definition which tells it which whisper model to use. (The deprecated 'gtk-app' has its own copy too.)
 
 ```python
 # Change from:
@@ -101,8 +104,8 @@ Next you can restart the app.
    # Web app (browser-based)
    cd web-app && ./run.sh
    
-   # GTK app (Linux desktop)
-   cd gtk-app && ./run.sh
+   # Desktop app (Linux)
+   cd qt-app && ./run.sh
    ```
 
 ## Requirements

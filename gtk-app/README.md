@@ -1,5 +1,11 @@
 # Lingo GTK: Voice Typer - GTK4 Desktop App 🎤
 
+> ## ⚠️ Deprecated
+>
+> This GTK4 version has been superseded by [`qt-app`](../qt-app/README.md), a
+> PyQt6 rewrite with the same features. It is kept here, unchanged and
+> unmaintained, for anyone who needs a GTK build. New work goes in `qt-app`.
+
 [![Python](https://img.shields.io/badge/Python-3.x-blue?logo=python&logoColor=white)](voice_typer.py)
 [![GTK4](https://img.shields.io/badge/GTK-4.0-green?logo=gnome&logoColor=white)](voice_typer.py)
 [![Framework Free](https://img.shields.io/badge/Framework_Free-orange)](voice_typer.py)
