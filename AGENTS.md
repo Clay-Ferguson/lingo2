@@ -102,11 +102,12 @@ cd qt-app && ./run.sh   # Launch floating mic button
   validates input and emits signals; `window.py` applies them. Two of the three
   settings have live side effects (the threshold reaches a running recorder, a
   device change stops the mic), and the window is the only thing that owns both.
-- **The icon buttons are recolored by hand on every phase change.** An icon is
-  a pixmap and does not follow the stylesheet's `color` rule, so the white
-  "typing" phase would otherwise leave white icons on a white background. Only
-  the `-symbolic` theme icons are recolored; the full-color fallbacks silhouette
-  into a blob.
+- **The icon buttons are painted white once, at construction, and never
+  change.** An icon is a pixmap and does not follow the stylesheet's `color`
+  rule, so it has to be painted by hand -- but one fixed color is all this
+  window needs, so it does not track the phase. Only the `-symbolic` theme
+  icons are painted; the full-color fallbacks silhouette into a blob, so they
+  are used as they ship.
 - **`on_processing_phase_changed` repolishes the mic checkbox as well as the
   window.** A repolish reaches exactly one widget, and the rule that flips the
   checkbox text black for the white phase lives on the checkbox.

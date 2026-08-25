@@ -19,7 +19,7 @@ import logging
 import time
 
 from PyQt6.QtCore import QSize, Qt, QTimer
-from PyQt6.QtGui import QColor, QIcon, QPainter, QPalette, QPixmap
+from PyQt6.QtGui import QColor, QIcon, QPainter, QPixmap
 from PyQt6.QtWidgets import (QApplication, QCheckBox, QHBoxLayout, QLayout,
                              QMessageBox, QSizePolicy, QSpacerItem, QStyle,
                              QToolButton, QVBoxLayout, QWidget)
@@ -79,8 +79,7 @@ def build_stylesheet() -> str:
         rules.append(f'QWidget#voiceTyperWindow[phase="{phase}"] {{ background: {color}; }}')
 
     # White background needs dark text on every child that draws any. The icon
-    # buttons draw none -- they are handled by _apply_icon_color, because an
-    # icon is a pixmap and does not follow a `color` rule.
+    # buttons draw none: the gear is a white pixmap in every phase.
     rules.append('QWidget#voiceTyperWindow[phase="typing"] QCheckBox { color: #000000; }')
     return "\n".join(rules)
 
@@ -90,38 +89,44 @@ def build_stylesheet() -> str:
 # =============================================================================
 
 # Symbolic icons first, and not only out of taste: a symbolic icon is a
-# single-color silhouette carried in its alpha channel, so it can be recolored
-# to match the text around it. The full-color fallbacks cannot -- recoloring
-# Yaru's `preferences-system` turns the gear into a filled blob -- so those
-# are used as they ship.
+# single-color silhouette carried in its alpha channel, so it can be painted
+# white. The full-color fallbacks cannot -- painting Yaru's
+# `preferences-system` turns the gear into a filled blob -- so those are used
+# as they ship.
 GEAR_SYMBOLIC = ("preferences-system-symbolic", "emblem-system-symbolic",
                  "applications-system-symbolic")
 GEAR_FALLBACK = ("preferences-system", "emblem-system", "system-run")
+
+# The icons are white in every phase. The window's background changes color to
+# report what the pipeline is doing, but the icons do not follow it -- one
+# fixed color is all this window needs, and it is what the theme's own dark
+# titlebar draws in.
+ICON_COLOR = QColor("#FFFFFF")
 
 
 def load_icon(
     symbolic_names: tuple[str, ...],
     fallback_names: tuple[str, ...],
     standard_pixmap: QStyle.StandardPixmap,
-) -> tuple[QIcon, bool]:
-    """Resolve a theme icon, reporting whether it is safe to recolor.
+    dpr: float,
+) -> QIcon:
+    """Resolve a theme icon, painted white if it is safe to paint.
 
-    Returns (icon, recolorable). A thin icon theme that has neither name still
-    yields a usable icon via the Qt style, at the cost of not tracking the
-    phase colors.
+    A thin icon theme that has neither name still yields a usable icon via the
+    Qt style, at the cost of not being white.
     """
     for name in symbolic_names:
         icon = QIcon.fromTheme(name)
         if not icon.isNull():
-            return icon, True
+            return paint(icon, ICON_COLOR, dpr)
     for name in fallback_names:
         icon = QIcon.fromTheme(name)
         if not icon.isNull():
-            return icon, False
-    return QApplication.style().standardIcon(standard_pixmap), False
+            return icon
+    return QApplication.style().standardIcon(standard_pixmap)
 
 
-def recolor(icon: QIcon, color: QColor, dpr: float) -> QIcon:
+def paint(icon: QIcon, color: QColor, dpr: float) -> QIcon:
     """Repaint a symbolic icon's silhouette in `color`.
 
     SourceIn keeps the alpha channel and replaces everything else, which is
@@ -157,10 +162,6 @@ class VoiceTyperWindow(QWidget):
         self.config = load_config()
         self._active_phase: str | None = None
         self._settings_dialog: SettingsDialog | None = None
-        # (button, untinted icon) for every icon safe to recolor, plus a
-        # cache of the tinted results -- phases flip on every utterance.
-        self._icon_bases: list[tuple[QToolButton, QIcon]] = []
-        self._recolored: dict[tuple[str, str, float], QIcon] = {}
 
         # Auto-off timer state
         self._last_audio_detection_time: float | None = None
@@ -199,8 +200,6 @@ class VoiceTyperWindow(QWidget):
         # window to resize itself. See _enforce_size.
         layout.setSizeConstraint(QLayout.SizeConstraint.SetFixedSize)
         self._pad_to_min_width()
-
-        self._apply_icon_color()
 
         self._auto_off_timer = QTimer(self)
         self._auto_off_timer.setInterval(1000)
@@ -264,35 +263,10 @@ class VoiceTyperWindow(QWidget):
         button.setAccessibleName(name)
         button.clicked.connect(on_click)
 
-        icon, recolorable = load_icon(symbolic, fallback, standard_pixmap)
-        button.setIcon(icon)
-        if recolorable:
-            # Kept so _apply_icon_color always re-tints from the original
-            # rather than tinting an already-tinted pixmap. Held here rather
-            # than as a widget property because a QVariant round-trip hands
-            # back a fresh QIcon each time, which makes the icon impossible to
-            # identify -- and the recolor cache keyed on it useless.
-            self._icon_bases.append((button, icon))
+        button.setIcon(
+            load_icon(symbolic, fallback, standard_pixmap, self.devicePixelRatioF())
+        )
         return button
-
-    def _apply_icon_color(self) -> None:
-        """Recolor the icons to whatever the current phase paints text in.
-
-        The stylesheet flips child text to black for the white 'typing' phase
-        and leaves it at the palette color otherwise; a pixmap does not follow
-        that rule, so the buttons are re-tinted by hand to the same two colors.
-        """
-        if self._active_phase == "typing":
-            color = QColor("#000000")
-        else:
-            color = self.palette().color(QPalette.ColorRole.WindowText)
-
-        dpr = self.devicePixelRatioF()
-        for button, base in self._icon_bases:
-            key = (button.accessibleName(), color.name(), dpr)
-            if key not in self._recolored:
-                self._recolored[key] = recolor(base, color, dpr)
-            button.setIcon(self._recolored[key])
 
     # -- settings dialog ---------------------------------------------------
 
@@ -371,7 +345,6 @@ class VoiceTyperWindow(QWidget):
         for widget in (self, self.mic_checkbox):
             widget.style().unpolish(widget)
             widget.style().polish(widget)
-        self._apply_icon_color()
         self.update()
         log.debug(f"Processing phase active: {phase}")
 
