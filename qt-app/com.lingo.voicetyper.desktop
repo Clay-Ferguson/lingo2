@@ -1,5 +1,5 @@
 [Desktop Entry]
-Name=Lingo Voice Typer
+Name=Lingo
 Comment=System-wide voice-to-text input
 Exec=/mnt/projects/lingo2/qt-app/run.sh
 Path=/mnt/projects/lingo2/qt-app

@@ -1,10 +1,16 @@
-"""The single control window: a mic toggle, a Close button, and settings.
+"""The single control window: a mic toggle and a gear.
 
-A faithful port of the GTK4 layout, including the feature that makes the app
+Descended from the GTK4 layout, including the feature that makes the app
 usable without reading anything -- the whole window changes color to report
 what the pipeline is doing (green = hearing you, orange = transcribing,
 white = typing). Those four colors are semantic signals rather than theming,
 so unlike the rest of the styling they are fixed hex values.
+
+The window is deliberately one row of controls and nothing else. Settings live
+in a separate dialog (see settings_dialog.py): this window sits on top of
+whatever you are dictating into, so every pixel it occupies covers up the real
+work, and -- see _enforce_size -- a window that resizes itself is the one
+thing this app must not do.
 """
 
 from __future__ import annotations
@@ -12,16 +18,18 @@ from __future__ import annotations
 import logging
 import time
 
-from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtWidgets import (QApplication, QCheckBox, QComboBox, QHBoxLayout,
-                             QLabel, QLayout, QLineEdit, QMessageBox,
-                             QPushButton, QToolButton, QVBoxLayout, QWidget)
+from PyQt6.QtCore import QSize, Qt, QTimer
+from PyQt6.QtGui import QColor, QIcon, QPainter, QPalette, QPixmap
+from PyQt6.QtWidgets import (QApplication, QCheckBox, QHBoxLayout, QLayout,
+                             QMessageBox, QSizePolicy, QSpacerItem, QStyle,
+                             QToolButton, QVBoxLayout, QWidget)
 
 from . import APP_NAME, UI_FONT_PX
 from .audio import AudioRecorder
 from .config import (DEFAULT_MIC_AUTO_OFF_TIMEOUT_S, DEFAULT_SILENCE_THRESHOLD,
                      get_input_devices, load_config, save_config)
 from .keyboard import close_keyboard_injector, get_keyboard_injector, type_text
+from .settings_dialog import SettingsDialog
 from .transcribe import cleanup_temp_audio_files
 
 log = logging.getLogger(__name__)
@@ -36,21 +44,12 @@ PHASE_COLORS = {
     "typing": "#FFFFFF",
 }
 
-# Width budget for the wrapped help paragraphs, and therefore the width of the
-# expanded window. See _help_label for why this is fixed rather than maximum.
-HELP_TEXT_WIDTH = 340
-
-THRESHOLD_HELP = (
-    "Typical range is 0.001–0.02: lower values make the mic more sensitive; "
-    "raise it to ignore background noise. Set the value as low as possible for "
-    "best reliablility. If you have any problems with this application try "
-    "lowering this threshold value."
-)
-
-AUTO_OFF_HELP = (
-    "Automatically turn off the microphone after this many seconds without a "
-    "successful transcription. Set to 0 to disable auto-off."
-)
+# The checkbox indicator is 24px and its label runs at UI_FONT_PX, because
+# this window is glanced at rather than read. The icons are sized to sit at
+# the same visual weight rather than looking like afterthoughts next to it.
+ICON_PX = 22
+MIN_WINDOW_WIDTH = 200
+ICON_BUTTON_PX = 32
 
 
 def build_stylesheet() -> str:
@@ -61,34 +60,85 @@ def build_stylesheet() -> str:
     The 'typing' phase forces text black because its background is white, and
     Qt does not repaint child text just because the ancestor's background
     changed -- each child type has to be named.
-    """
-    muted = QApplication.palette().color(
-        QApplication.palette().ColorRole.WindowText
-    )
-    muted.setAlpha(180)
 
+    Only widget types this window actually owns are named here. A stylesheet
+    set on a widget also applies to child dialogs, so a bare `QLabel` rule
+    would reach into the settings dialog and, during the white phase, black
+    out its text against its own dark background. The settings dialog has no
+    QCheckBox and no #iconButton, so nothing below can escape into it.
+    """
     rules = [
         f"QCheckBox {{ font-size: {UI_FONT_PX}px; }}",
         "QCheckBox::indicator { width: 24px; height: 24px; }",
         "QCheckBox:checked { color: #e53935; font-weight: bold; }",
-        f"QComboBox {{ font-size: {UI_FONT_PX}px; }}",
-        "QPushButton#closeButton { min-width: 60px; min-height: 36px;"
-        " padding: 6px 16px; font-size: 16px; }",
-        f"QLabel#helpText {{ font-size: 14px; color: rgba({muted.red()},"
-        f" {muted.green()}, {muted.blue()}, 0.7); }}",
+        f"QToolButton#iconButton {{ min-width: {ICON_BUTTON_PX}px;"
+        f" min-height: {ICON_BUTTON_PX}px; border-radius: 4px; }}",
     ]
 
     for phase, color in PHASE_COLORS.items():
         rules.append(f'QWidget#voiceTyperWindow[phase="{phase}"] {{ background: {color}; }}')
 
-    # White background needs dark text on every child that draws any.
-    rules.append(
-        'QWidget#voiceTyperWindow[phase="typing"] QLabel,'
-        ' QWidget#voiceTyperWindow[phase="typing"] QCheckBox,'
-        ' QWidget#voiceTyperWindow[phase="typing"] QToolButton'
-        " { color: #000000; }"
-    )
+    # White background needs dark text on every child that draws any. The icon
+    # buttons draw none -- they are handled by _apply_icon_color, because an
+    # icon is a pixmap and does not follow a `color` rule.
+    rules.append('QWidget#voiceTyperWindow[phase="typing"] QCheckBox { color: #000000; }')
     return "\n".join(rules)
+
+
+# =============================================================================
+# Icons
+# =============================================================================
+
+# Symbolic icons first, and not only out of taste: a symbolic icon is a
+# single-color silhouette carried in its alpha channel, so it can be recolored
+# to match the text around it. The full-color fallbacks cannot -- recoloring
+# Yaru's `preferences-system` turns the gear into a filled blob -- so those
+# are used as they ship.
+GEAR_SYMBOLIC = ("preferences-system-symbolic", "emblem-system-symbolic",
+                 "applications-system-symbolic")
+GEAR_FALLBACK = ("preferences-system", "emblem-system", "system-run")
+
+
+def load_icon(
+    symbolic_names: tuple[str, ...],
+    fallback_names: tuple[str, ...],
+    standard_pixmap: QStyle.StandardPixmap,
+) -> tuple[QIcon, bool]:
+    """Resolve a theme icon, reporting whether it is safe to recolor.
+
+    Returns (icon, recolorable). A thin icon theme that has neither name still
+    yields a usable icon via the Qt style, at the cost of not tracking the
+    phase colors.
+    """
+    for name in symbolic_names:
+        icon = QIcon.fromTheme(name)
+        if not icon.isNull():
+            return icon, True
+    for name in fallback_names:
+        icon = QIcon.fromTheme(name)
+        if not icon.isNull():
+            return icon, False
+    return QApplication.style().standardIcon(standard_pixmap), False
+
+
+def recolor(icon: QIcon, color: QColor, dpr: float) -> QIcon:
+    """Repaint a symbolic icon's silhouette in `color`.
+
+    SourceIn keeps the alpha channel and replaces everything else, which is
+    exactly a symbolic icon's shape. `dpr` is passed through so the pixmap is
+    rendered at the screen's real resolution rather than upscaled.
+    """
+    source = icon.pixmap(QSize(ICON_PX, ICON_PX), dpr)
+    tinted = QPixmap(source.size())
+    tinted.setDevicePixelRatio(source.devicePixelRatio())
+    tinted.fill(Qt.GlobalColor.transparent)
+
+    painter = QPainter(tinted)
+    painter.drawPixmap(0, 0, source)
+    painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
+    painter.fillRect(tinted.rect(), color)
+    painter.end()
+    return QIcon(tinted)
 
 
 # =============================================================================
@@ -106,28 +156,51 @@ class VoiceTyperWindow(QWidget):
         self.is_recording = False
         self.config = load_config()
         self._active_phase: str | None = None
+        self._settings_dialog: SettingsDialog | None = None
+        # (button, untinted icon) for every icon safe to recolor, plus a
+        # cache of the tinted results -- phases flip on every utterance.
+        self._icon_bases: list[tuple[QToolButton, QIcon]] = []
+        self._recolored: dict[tuple[str, str, float], QIcon] = {}
 
         # Auto-off timer state
         self._last_audio_detection_time: float | None = None
+
+        # Scanned here rather than when the settings dialog is first opened.
+        # The rescan tears down and reinitializes PortAudio, which is safe at
+        # startup -- _auto_start_microphone has not run yet -- and decidedly
+        # not safe later, with a capture stream open.
+        self.input_devices = get_input_devices(rescan=True)
 
         self.setObjectName("voiceTyperWindow")
         # Without this a plain QWidget ignores stylesheet backgrounds entirely,
         # and every phase color silently does nothing.
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setWindowTitle(APP_NAME)
+        # Title bar with a close button only. CustomizeWindowHint drops the
+        # default hint set, so the two hints after it are the whole menu:
+        # no minimize, no maximize. The compositor decides whether to honor
+        # it, so this is a request, not a guarantee.
+        self.setWindowFlags(
+            Qt.WindowType.Window
+            | Qt.WindowType.CustomizeWindowHint
+            | Qt.WindowType.WindowTitleHint
+            | Qt.WindowType.WindowCloseButtonHint
+        )
         self.setStyleSheet(build_stylesheet())
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(15, 10, 15, 10)
-        layout.setSpacing(10)
+        layout.setContentsMargins(12, 8, 12, 8)
+        layout.setSpacing(0)
         layout.addLayout(self._build_top_row())
-        layout.addWidget(self._build_settings_toggle())
-        layout.addWidget(self._build_settings_panel())
 
-        # Reproduces GTK's set_resizable(False) with a -1 height: the window is
-        # exactly as tall as its contents, and shrinks again when Settings
-        # collapses.
+        # Reproduces GTK's set_resizable(False): the window is exactly as big
+        # as its one row of controls. Nothing in it can change size any more,
+        # so unlike the old expanding Settings panel this never asks the
+        # window to resize itself. See _enforce_size.
         layout.setSizeConstraint(QLayout.SizeConstraint.SetFixedSize)
+        self._pad_to_min_width()
+
+        self._apply_icon_color()
 
         self._auto_off_timer = QTimer(self)
         self._auto_off_timer.setInterval(1000)
@@ -137,110 +210,110 @@ class VoiceTyperWindow(QWidget):
 
     # -- construction ------------------------------------------------------
 
+    def _pad_to_min_width(self) -> None:
+        """Widen the row's spacer until the window is at least MIN_WINDOW_WIDTH.
+
+        SetFixedSize pins the window to its size hint, so growing the hint is
+        the only way to set a floor on the width.
+        """
+        deficit = MIN_WINDOW_WIDTH - self.sizeHint().width()
+        if deficit > 0:
+            self._row_spacer.changeSize(
+                deficit, 0, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum
+            )
+            self.layout().invalidate()
+
     def _build_top_row(self) -> QHBoxLayout:
         row = QHBoxLayout()
-        row.setSpacing(10)
+        row.setSpacing(4)
 
         self.mic_checkbox = QCheckBox("Mic")
         self.mic_checkbox.toggled.connect(self.on_mic_toggled)
         row.addWidget(self.mic_checkbox)
 
-        row.addStretch(1)
+        # A real spacer rather than addStretch: _pad_to_min_width gives it a
+        # minimum width, which is how the window reaches MIN_WINDOW_WIDTH
+        # without a setMinimumWidth that would fight SetFixedSize below.
+        self._row_spacer = QSpacerItem(
+            0, 0, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum
+        )
+        row.addItem(self._row_spacer)
 
-        close_button = QPushButton("Close")
-        close_button.setObjectName("closeButton")
-        close_button.clicked.connect(self.close)
-        row.addWidget(close_button)
+        self.settings_button = self._icon_button(
+            GEAR_SYMBOLIC, GEAR_FALLBACK,
+            QStyle.StandardPixmap.SP_FileDialogDetailedView,
+            "Settings", self.open_settings,
+        )
+        row.addWidget(self.settings_button)
+        # No close button: the title bar already has one, at the same size, a
+        # few pixels away. A second one only made the window wider.
         return row
 
-    def _build_settings_toggle(self) -> QToolButton:
-        """Qt has no Gtk.Expander, so this is the usual arrow-button stand-in."""
-        self.settings_toggle = QToolButton()
-        self.settings_toggle.setText("Settings")
-        self.settings_toggle.setCheckable(True)
-        self.settings_toggle.setChecked(False)
-        self.settings_toggle.setAutoRaise(True)
-        self.settings_toggle.setArrowType(Qt.ArrowType.RightArrow)
-        self.settings_toggle.setToolButtonStyle(
-            Qt.ToolButtonStyle.ToolButtonTextBesideIcon
-        )
-        self.settings_toggle.toggled.connect(self._on_settings_toggled)
-        return self.settings_toggle
+    def _icon_button(self, symbolic, fallback, standard_pixmap, name, on_click) -> QToolButton:
+        """A compact square icon-only button.
 
-    def _build_settings_panel(self) -> QWidget:
-        self.settings_panel = QWidget()
-        panel = QVBoxLayout(self.settings_panel)
-        panel.setContentsMargins(4, 6, 4, 4)
-        panel.setSpacing(6)
+        The name doubles as tooltip and accessible name: an icon-only button
+        with neither is invisible to a screen reader.
+        """
+        button = QToolButton()
+        button.setObjectName("iconButton")
+        button.setAutoRaise(True)
+        button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+        button.setIconSize(QSize(ICON_PX, ICON_PX))
+        button.setToolTip(name)
+        button.setAccessibleName(name)
+        button.clicked.connect(on_click)
 
-        # Microphone device dropdown
-        self.mic_dropdown = QComboBox()
-        self._populate_mic_dropdown()
-        self.mic_dropdown.currentIndexChanged.connect(self.on_mic_changed)
-        panel.addLayout(self._labeled_row("Input device", self.mic_dropdown))
+        icon, recolorable = load_icon(symbolic, fallback, standard_pixmap)
+        button.setIcon(icon)
+        if recolorable:
+            # Kept so _apply_icon_color always re-tints from the original
+            # rather than tinting an already-tinted pixmap. Held here rather
+            # than as a widget property because a QVariant round-trip hands
+            # back a fresh QIcon each time, which makes the icon impossible to
+            # identify -- and the recolor cache keyed on it useless.
+            self._icon_bases.append((button, icon))
+        return button
 
-        # Silence threshold
-        self.threshold_entry = QLineEdit()
-        self.threshold_entry.setMaxLength(8)
-        self.threshold_entry.setFixedWidth(80)
-        self.threshold_entry.setToolTip(
-            "Lower values detect quieter audio; higher values filter background noise."
-        )
-        self.threshold_entry.setText(self._format_threshold(self._get_silence_threshold()))
-        # editingFinished covers Enter *and* focus-out, which GTK needed two
-        # separate handlers for.
-        self.threshold_entry.editingFinished.connect(self._commit_threshold_entry)
-        panel.addLayout(self._labeled_row("Silence threshold", self.threshold_entry))
-        panel.addWidget(self._help_label(THRESHOLD_HELP))
+    def _apply_icon_color(self) -> None:
+        """Recolor the icons to whatever the current phase paints text in.
 
-        # Auto-off timeout
-        self.auto_off_entry = QLineEdit()
-        self.auto_off_entry.setMaxLength(6)
-        self.auto_off_entry.setFixedWidth(80)
-        self.auto_off_entry.setToolTip(
-            "Seconds of inactivity before the microphone turns off automatically. 0 to disable."
-        )
-        self.auto_off_entry.setText(str(self._get_auto_off_timeout()))
-        self.auto_off_entry.editingFinished.connect(self._commit_auto_off_entry)
-        panel.addLayout(self._labeled_row("Auto-off timeout (s)", self.auto_off_entry))
-        panel.addWidget(self._help_label(AUTO_OFF_HELP))
+        The stylesheet flips child text to black for the white 'typing' phase
+        and leaves it at the palette color otherwise; a pixmap does not follow
+        that rule, so the buttons are re-tinted by hand to the same two colors.
+        """
+        if self._active_phase == "typing":
+            color = QColor("#000000")
+        else:
+            color = self.palette().color(QPalette.ColorRole.WindowText)
 
-        self.settings_panel.setVisible(False)
-        return self.settings_panel
+        dpr = self.devicePixelRatioF()
+        for button, base in self._icon_bases:
+            key = (button.accessibleName(), color.name(), dpr)
+            if key not in self._recolored:
+                self._recolored[key] = recolor(base, color, dpr)
+            button.setIcon(self._recolored[key])
 
-    def _labeled_row(self, text: str, widget: QWidget) -> QHBoxLayout:
-        row = QHBoxLayout()
-        row.setSpacing(8)
-        label = QLabel(text)
-        row.addWidget(label)
-        row.addStretch(1)
-        row.addWidget(widget)
-        return row
+    # -- settings dialog ---------------------------------------------------
 
-    def _help_label(self, text: str) -> QLabel:
-        label = QLabel(text)
-        label.setObjectName("helpText")
-        label.setWordWrap(True)
-        # Fixed, not maximum. A wrapped label's height is a function of its
-        # width (hasHeightForWidth() is True), so with only a maximum the
-        # window's sizeHint depends on how the layout happens to negotiate
-        # width. Pinning the width makes the required height deterministic,
-        # which is what keeps the window from settling at the wrong height.
-        label.setFixedWidth(HELP_TEXT_WIDTH)
-        return label
+    def open_settings(self) -> None:
+        """Show the settings dialog, reusing the one instance if it exists."""
+        if self._settings_dialog is None:
+            dialog = SettingsDialog(
+                self,
+                input_devices=self.input_devices,
+                current_device=self.config.get("audio_device"),
+                silence_threshold=self._get_silence_threshold(),
+                auto_off_timeout=self._get_auto_off_timeout(),
+            )
+            dialog.audio_device_changed.connect(self.on_audio_device_changed)
+            dialog.silence_threshold_changed.connect(self._update_silence_threshold)
+            dialog.auto_off_timeout_changed.connect(self._update_auto_off_timeout)
+            self._settings_dialog = dialog
 
-    def _on_settings_toggled(self, expanded: bool) -> None:
-        self.settings_toggle.setArrowType(
-            Qt.ArrowType.DownArrow if expanded else Qt.ArrowType.RightArrow
-        )
-        self.settings_panel.setVisible(expanded)
-        # Resize here rather than leaving it to the layout request Qt posts,
-        # so no compositor event can be processed while the window size and
-        # the panel disagree.
-        layout = self.layout()
-        layout.invalidate()
-        layout.activate()
-        self._enforce_size()
+        self._settings_dialog.show()
+        self._settings_dialog.raise_()
+        self._settings_dialog.activateWindow()
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
@@ -251,26 +324,25 @@ class VoiceTyperWindow(QWidget):
 
         Wayland compositors reply to a state change -- losing or regaining
         focus, most visibly -- with a configure event carrying a size. Mutter
-        sends the size it last configured us at, and that size is stale: when
-        Settings expands we resize ourselves, which mutter renders but does
-        not record. So the first click on another window arrives with a
-        configure for the collapsed size.
+        sends the size it last configured us at, and that size can be stale:
+        when the window resizes itself, mutter renders the new size but does
+        not record it, so the next configure arrives with the old one.
 
         Qt applies that size verbatim instead of clamping it to the min/max
-        the window advertised, and the result is the whole reported symptom at
-        once: the window shrinks back to collapsed height, the settings panel
-        is clipped out of view even though the arrow still points down, and
-        the rows above it are squeezed until the Settings button overlaps
-        Close. X11 does not do this, which is why it only shows up on Wayland.
+        the window advertised, which used to squeeze the rows until the
+        Settings button overlapped Close. X11 does not do this, which is why
+        it only showed up on Wayland.
+
+        Now that Settings is a separate dialog, this window never changes its
+        own size, so this should never fire again. It is kept as a belt: it
+        logs when it corrects, so the log says whether that holds.
 
         SetFixedSize keeps minimumSize() == maximumSize() == the size the
         layout needs, so any other size can only have come from the
-        compositor. Resizing back also teaches mutter the real size, so this
-        corrects once per Settings toggle and then stays quiet.
-
-        This cannot use setFixedSize(): it returns early when neither the
-        minimum nor the maximum changes, which is exactly this case, and that
-        is why re-asserting the constraints alone never fixed it.
+        compositor. This cannot use setFixedSize(): it returns early when
+        neither the minimum nor the maximum changes, which is exactly this
+        case, and that is why re-asserting the constraints alone never fixed
+        it.
         """
         required = self.minimumSize()
         if required != self.maximumSize() or self.size() == required:
@@ -291,9 +363,15 @@ class VoiceTyperWindow(QWidget):
         self._active_phase = target
 
         self.setProperty("phase", target or "")
-        # Qt only re-evaluates property-based selectors on a repolish.
-        self.style().unpolish(self)
-        self.style().polish(self)
+        # Qt only re-evaluates property-based selectors on a repolish, and a
+        # repolish reaches exactly one widget. The background rule is on this
+        # window, but the rule that flips the checkbox's text black for the
+        # white phase is on the checkbox, so it has to be repolished too --
+        # without this the "Mic" label stays white on white.
+        for widget in (self, self.mic_checkbox):
+            widget.style().unpolish(widget)
+            widget.style().polish(widget)
+        self._apply_icon_color()
         self.update()
         log.debug(f"Processing phase active: {phase}")
 
@@ -302,69 +380,27 @@ class VoiceTyperWindow(QWidget):
     def _get_silence_threshold(self) -> float:
         return float(self.config.get("silence_threshold", DEFAULT_SILENCE_THRESHOLD))
 
-    def _format_threshold(self, value: float) -> str:
-        formatted = f"{float(value):.4f}".rstrip("0").rstrip(".")
-        return formatted if formatted else "0"
-
-    def _commit_threshold_entry(self) -> None:
-        text = self.threshold_entry.text().strip()
-        if not text:
-            self.threshold_entry.setText(self._format_threshold(self._get_silence_threshold()))
-            return
-        try:
-            value = float(text)
-        except ValueError:
-            print("⚠️  Silence threshold must be a number.")
-            self.threshold_entry.setText(self._format_threshold(self._get_silence_threshold()))
-            return
-        if value <= 0:
-            print("⚠️  Silence threshold must be positive.")
-            self.threshold_entry.setText(self._format_threshold(self._get_silence_threshold()))
-            return
-        self._update_silence_threshold(value)
-
     def _update_silence_threshold(self, value: float) -> None:
+        """Persist a new threshold and push it at the running stream."""
         value = float(value)
-        if abs(self._get_silence_threshold() - value) < 1e-6:
-            self.threshold_entry.setText(self._format_threshold(value))
-            return
         self.config["silence_threshold"] = value
         save_config(self.config)
         if self.recorder:
             self.recorder.set_silence_threshold(value)
-        self.threshold_entry.setText(self._format_threshold(value))
-        print(f"🎚️ Silence threshold set to {self._format_threshold(value)}")
+        formatted = f"{value:.4f}".rstrip("0").rstrip(".") or "0"
+        print(f"🎚️ Silence threshold set to {formatted}")
 
     # -- settings: auto-off timeout ---------------------------------------
 
     def _get_auto_off_timeout(self) -> int:
         return int(self.config.get("mic_auto_off_timeout", DEFAULT_MIC_AUTO_OFF_TIMEOUT_S))
 
-    def _commit_auto_off_entry(self) -> None:
-        text = self.auto_off_entry.text().strip()
-        if not text:
-            self.auto_off_entry.setText(str(self._get_auto_off_timeout()))
-            return
-        try:
-            value = int(text)
-        except ValueError:
-            print("⚠️  Auto-off timeout must be an integer.")
-            self.auto_off_entry.setText(str(self._get_auto_off_timeout()))
-            return
-        if value < 0:
-            print("⚠️  Auto-off timeout must be 0 or positive.")
-            self.auto_off_entry.setText(str(self._get_auto_off_timeout()))
-            return
-        self._update_auto_off_timeout(value)
-
     def _update_auto_off_timeout(self, value: int) -> None:
+        # Read live by _check_auto_off on every tick, so there is nothing to
+        # push anywhere -- saving it is enough.
         value = int(value)
-        if self._get_auto_off_timeout() == value:
-            self.auto_off_entry.setText(str(value))
-            return
         self.config["mic_auto_off_timeout"] = value
         save_config(self.config)
-        self.auto_off_entry.setText(str(value))
         if value == 0:
             print("⏱️  Mic auto-off disabled")
         else:
@@ -382,41 +418,15 @@ class VoiceTyperWindow(QWidget):
         self.mic_checkbox.setChecked(True)  # triggers on_mic_toggled
         self.on_processing_phase_changed("idle")
 
-    def _populate_mic_dropdown(self) -> None:
-        """Fill the dropdown, selecting the saved device if it is still present."""
-        self.mic_dropdown.addItem("System Default")
-
-        # Rescan only at startup; it tears down PortAudio and is not free.
-        self.input_devices = get_input_devices(rescan=True)
-        for device in self.input_devices:
-            self.mic_dropdown.addItem(device["name"])
-
-        saved_device = self.config.get("audio_device")
-        if saved_device is None:
-            self.mic_dropdown.setCurrentIndex(0)
-            return
-
-        for i, device in enumerate(self.input_devices):
-            if device["name"] == saved_device:
-                self.mic_dropdown.setCurrentIndex(i + 1)  # +1 for "System Default"
-                return
-
-        log.warning(f"Saved device '{saved_device}' not found, using default")
-        self.mic_dropdown.setCurrentIndex(0)
-
-    def on_mic_changed(self, index: int) -> None:
+    def on_audio_device_changed(self, name: str | None) -> None:
         """Handle microphone selection change."""
         # The stream is already open on the old device, so stop first.
         if self.mic_checkbox.isChecked():
             self.mic_checkbox.setChecked(False)
 
-        if index <= 0:
-            self.config["audio_device"] = None
-        else:
-            self.config["audio_device"] = self.input_devices[index - 1]["name"]
-
+        self.config["audio_device"] = name
         save_config(self.config)
-        log.info(f"Microphone changed to: {self.config['audio_device'] or 'System Default'}")
+        log.info(f"Microphone changed to: {name or 'System Default'}")
 
     def on_mic_toggled(self, checked: bool) -> None:
         if checked:
@@ -524,6 +534,10 @@ class VoiceTyperWindow(QWidget):
 
     def closeEvent(self, event) -> None:
         """Clean up when the window closes."""
+        # A child dialog does not close with its parent, and while it is still
+        # open Qt has a window left and will not quit the app.
+        if self._settings_dialog is not None:
+            self._settings_dialog.close()
         self.stop_recording()
         close_keyboard_injector()
         cleanup_temp_audio_files()

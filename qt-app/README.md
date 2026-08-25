@@ -14,7 +14,7 @@ A lightweight Linux desktop application that provides system-wide voice-to-text 
 
 ## How It Works
 
-1. **Select Microphone** - select your device for your mic
+1. **Select Microphone** - click the gear to open Settings and pick your mic
 2. **Click Microphone Checkbox** - when the checkbox is checked anything you speak will be typed into wherever your edit cursor is, in any application system wide.
 3. **Speak naturally** - after 1 second of silence, your speech is transcribed
 4. **Text is typed** wherever your cursor is focused
@@ -94,6 +94,7 @@ that are tied to Linux are also the parts that are easiest to test headlessly:
 | `voice_typer/audio.py` | recording + RMS silence detection | signals only |
 | `voice_typer/keyboard.py` | XDG Remote Desktop Portal keystroke injection (QtDBus) | D-Bus only |
 | `voice_typer/window.py` | the control window | yes |
+| `voice_typer/settings_dialog.py` | the settings dialog (widgets + validation only) | yes |
 | `voice_typer/__main__.py` | dependency checks and startup | yes |
 
 ## Troubleshooting & Tips

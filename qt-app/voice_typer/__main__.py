@@ -1,6 +1,6 @@
 """Entry point: python -m voice_typer
 
-Close the window by clicking Close.
+Close the window with the title bar close button.
 """
 
 from __future__ import annotations

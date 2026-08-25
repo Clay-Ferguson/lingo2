@@ -61,7 +61,12 @@ cd qt-app && ./run.sh   # Launch floating mic button
 - **Keyboard injection**: XDG Remote Desktop Portal over **QtDBus** (Wayland-safe)
 - **Logging**: Writes to `qt-app/voice_typer.log` (overwritten each run)
 - **Config file**: `~/.config/lingo-gtk.yaml` stores user preferences (microphone selection)
-- **Device selection**: GUI dropdown lets user pick microphone; saved to config file
+- **Device selection**: dropdown in the Settings dialog lets user pick microphone;
+  saved to config file
+- **UI shape**: the main window is one row -- mic checkbox and a gear -- and
+  never changes size. Settings open in a separate modeless dialog
+  (`settings_dialog.py`). There is no in-window close button; the title bar's
+  is the same size and a few pixels away
 - **Thread bridge**: the PortAudio callback and whisper worker threads reach the
   UI through `pyqtSignal`, never by touching widgets directly
 
@@ -83,9 +88,28 @@ cd qt-app && ./run.sh   # Launch floating mic button
   spurious utterances.
 - **`_enforce_size()` re-`resize()`s the window from `resizeEvent`.** Mutter
   replays a stale size in the configure that comes with focus changes, and Qt
-  applies it instead of clamping to the window's min/max, which collapses the
-  Settings panel and makes the widgets overlap. `setFixedSize()` cannot undo it
-  -- it returns early when the min and max are already correct, which they are.
+  applies it instead of clamping to the window's min/max, which used to collapse
+  the Settings panel and make the widgets overlap. `setFixedSize()` cannot undo
+  it -- it returns early when the min and max are already correct, which they
+  are. Settings is now a separate dialog and the main window never resizes
+  itself, so this should never fire; it is kept as a belt and logs when it
+  corrects.
+- **The main window must never resize itself.** That is why Settings lives in
+  `settings_dialog.py` rather than an expanding panel: a self-resizing,
+  non-resizable Wayland toplevel is the rare path that produced the bug above.
+  The dialog is deliberately *not* fixed-size, so it does not take that path.
+- **The settings dialog never touches the config file or the recorder.** It
+  validates input and emits signals; `window.py` applies them. Two of the three
+  settings have live side effects (the threshold reaches a running recorder, a
+  device change stops the mic), and the window is the only thing that owns both.
+- **The icon buttons are recolored by hand on every phase change.** An icon is
+  a pixmap and does not follow the stylesheet's `color` rule, so the white
+  "typing" phase would otherwise leave white icons on a white background. Only
+  the `-symbolic` theme icons are recolored; the full-color fallbacks silhouette
+  into a blob.
+- **`on_processing_phase_changed` repolishes the mic checkbox as well as the
+  window.** A repolish reaches exactly one widget, and the rule that flips the
+  checkbox text black for the white phase lives on the checkbox.
 - **`sounddevice` is imported lazily**, so a missing PortAudio produces the
   friendly dependency message instead of an import traceback.
 
@@ -94,7 +118,7 @@ cd qt-app && ./run.sh   # Launch floating mic button
 Both apps use similar silence detection (adjust for your mic):
 ```python
 # qt-app: DEFAULT_SILENCE_THRESHOLD lives in config.py, the rest in audio.py.
-# The threshold is also user-editable at runtime in the Settings panel.
+# The threshold is also user-editable at runtime in the Settings dialog.
 DEFAULT_SILENCE_THRESHOLD = 0.005  # RMS threshold
 SILENCE_DURATION_S = 1.0           # Seconds of silence → transcribe
 MIN_AUDIO_DURATION_S = 0.5         # Skip very short clips
@@ -118,7 +142,7 @@ if ((evt.ctrlKey || evt.metaKey) && evt.key.toLowerCase() === "x") {
 
 **Add API endpoint**: Insert before static files mount in whisper_server.py (line ~208)
 
-**Tune for quiet mics**: Lower the silence threshold in the Settings panel, check RMS in qt-app/voice_typer.log
+**Tune for quiet mics**: Lower the silence threshold in the Settings dialog, check RMS in qt-app/voice_typer.log
 
 ## Dependencies
 
