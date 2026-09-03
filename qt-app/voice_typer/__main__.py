@@ -9,10 +9,11 @@ import logging
 import sys
 from pathlib import Path
 
+import windowchrome
 from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import QApplication
 
-from . import APP_ID, APP_NAME
+from . import APP_ID, APP_NAME, LINGO_THEME
 from .transcribe import WHISPER_BINARY, WHISPER_MODEL, cleanup_temp_audio_files
 
 # =============================================================================
@@ -90,6 +91,11 @@ def main() -> int:
     # Clear anything a previous run left in /dev/shm
     cleanup_temp_audio_files()
 
+    # Before the QApplication, and it has to be: `configure()` picks the Wayland
+    # decoration plugin through an environment variable that the platform plugin
+    # reads during that constructor and never again. See windowchrome's README.
+    windowchrome.configure(LINGO_THEME)
+
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
     app.setApplicationDisplayName(APP_NAME)
@@ -100,6 +106,14 @@ def main() -> int:
     app.setDesktopFileName(APP_ID)
     if ICON.is_file():
         app.setWindowIcon(QIcon(str(ICON)))
+
+    # After the QApplication, and after anything that changes the application
+    # palette: `install()` captures the body's own surface and text colors at
+    # the moment it runs, then hands the title bar those palette roles. Lingo
+    # tunes no palette of its own, so here is as late as it gets — but a palette
+    # changed after this line is one it never saw, and the settings dialog's
+    # muted help color is derived from one of the roles it takes.
+    windowchrome.install(app)
 
     window = VoiceTyperWindow()
     window.show()

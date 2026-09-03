@@ -62,6 +62,36 @@ Unlike the old GTK version there is no `--system-site-packages` venv to create:
 PyQt6 comes from PyPI, whereas PyGObject had to come from the distro. `run.sh`
 lets uv build and refresh the environment on every launch.
 
+#### The `windowchrome` checkout
+
+The colored title bar comes from
+**[windowchrome](https://github.com/Clay-Ferguson/windowchrome)**, a small
+reusable PyQt6 library kept in its own repository so several apps can wear the
+same chrome. It is **not on PyPI**: `pyproject.toml` resolves it by path.
+
+Note the path is `../../windowchrome` — **two** levels up, not one. This app
+lives a directory deeper than the others that use it, so the checkout belongs
+beside `lingo2`, not beside `qt-app`:
+
+```bash
+cd ../..                   # the directory holding lingo2/
+git clone https://github.com/Clay-Ferguson/windowchrome.git
+```
+
+giving:
+
+```
+projects/
+├── lingo2/
+│   └── qt-app/            <- you are here
+└── windowchrome/          <- must sit beside lingo2, not beside qt-app
+```
+
+If it is missing, `./run.sh` fails immediately with an unresolved path
+dependency rather than with anything subtle. The checkout is used in place —
+`uv` installs it editable, so there is nothing to build and an edit there is
+live here on the next run.
+
 ### Running
 
 ```bash

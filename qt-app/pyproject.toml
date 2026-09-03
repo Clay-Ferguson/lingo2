@@ -8,7 +8,17 @@ dependencies = [
     "sounddevice>=0.4.6",
     "numpy>=1.21.0",
     "PyYAML>=6.0",
+    "windowchrome",
 ]
+
+# `windowchrome` is our own library — the colored title bar — and it is not on
+# PyPI: it is resolved by path from a checkout of its own. Note
+# the *two* levels up: unlike the other apps that use it, this one lives a
+# directory deeper (`lingo2/qt-app/`), so windowchrome is a sibling of `lingo2`
+# rather than of this directory. `editable` so an edit there is live here on the
+# next run, with nothing to rebuild.
+[tool.uv.sources]
+windowchrome = { path = "../../windowchrome", editable = true }
 
 # Not an installable package: uv only builds the virtualenv from the
 # dependencies above, and run.sh runs the code straight out of the tree.

@@ -67,6 +67,9 @@ cd qt-app && ./run.sh   # Launch floating mic button
   never changes size. Settings open in a separate modeless dialog
   (`settings_dialog.py`). There is no in-window close button; the title bar's
   is the same size and a few pixels away
+- **Window chrome**: the colored title bar comes from `windowchrome`, a library
+  of ours in its own repository -- see the entry under "Deliberate non-obvious
+  choices" below, and read `windowchrome/README.md` before touching any of it
 - **Thread bridge**: the PortAudio callback and whisper worker threads reach the
   UI through `pyqtSignal`, never by touching widgets directly
 
@@ -113,6 +116,30 @@ cd qt-app && ./run.sh   # Launch floating mic button
   checkbox text black for the white phase lives on the checkbox.
 - **`sounddevice` is imported lazily**, so a missing PortAudio produces the
   friendly dependency message instead of an import traceback.
+- **The window chrome is `windowchrome`'s, not ours.** The colored title bar is
+  a separate library; `[tool.uv.sources]` in `qt-app/pyproject.toml` resolves it
+  at `../../windowchrome` -- **two** levels up, unlike every other app that uses
+  it, because `qt-app` sits a directory deeper than they do. It has to be there
+  or `uv run` fails with an unresolved path dependency.
+  `windowchrome/README.md` carries the measurements behind it. The integration
+  is three calls and touches no layout: `configure(LINGO_THEME)` before
+  `QApplication` and `install(app)` after it, both in `__main__` and both
+  order-sensitive, plus the one below.
+- **`build_dialog_stylesheet()` derives its muted color from
+  `windowchrome.body_text_color()`, not from `QApplication.palette()`.**
+  `WindowText` is one of the three roles the title bar takes over, so the
+  application palette hands back the title bar's white and the help paragraphs
+  come out invisible on a light theme. Verified: after the repurposing the app
+  palette reports `WindowText = #ffffff` where `body_text_color()` returns
+  `#000000`. Nothing else in the app reads `Window` or `WindowText`; keep it
+  that way.
+- **`windowchrome` paints nothing inside the window, deliberately.** It briefly
+  had a `bordered_body()` that painted a thicker frame just inside the window
+  edge, and this app was the worst fit for it: `bordered_body()` renamed the
+  widget it was given, so `QWidget#voiceTyperWindow[phase="..."]` had to move to
+  a wrapper widget and the window went three deep. That was reverted -- the
+  window is a plain toplevel again, the phase colors are on it, and
+  `SetFixedSize` is back on its own layout. Do not reintroduce it.
 
 ## Silence Detection Config
 
@@ -153,7 +180,10 @@ if ((evt.ctrlKey || evt.metaKey) && evt.key.toLowerCase() === "x") {
 
 **qt-app** (run `./setup.sh` or manually install):
 - System: `portaudio19-dev`, `ffmpeg`, `libxcb-cursor0`, `libxkbcommon-x11-0` (Ubuntu/Debian names)
-- Python (via pyproject.toml/uv): `PyQt6`, `sounddevice`, `numpy`, `PyYAML`
+- Python (via pyproject.toml/uv): `PyQt6`, `sounddevice`, `numpy`, `PyYAML`,
+  and `windowchrome` -- the last of which is **not on PyPI**: it is resolved by
+  path from `../../windowchrome`, a checkout that must sit beside the `lingo2`
+  directory (not beside `qt-app`)
 - Keyboard injection: XDG Remote Desktop Portal via QtDBus (part of PyQt6; no PyGObject)
 
 ## Note to AI Agents
