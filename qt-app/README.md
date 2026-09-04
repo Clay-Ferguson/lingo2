@@ -19,8 +19,7 @@ A lightweight Linux desktop application that provides system-wide voice-to-text 
 3. **Speak naturally** - after 1 second of silence, your speech is transcribed
 4. **Text is typed** wherever your cursor is focused
 
-The window background reports what the pipeline is doing, so you can dictate
-without looking away from what you are typing into:
+The window background reports what the pipeline is doing, so you can dictate without looking away from what you are typing into:
 
 | Color | Meaning |
 |-------|---------|
@@ -50,28 +49,20 @@ Install uv (if not already installed):
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-Then install the system dependencies (PortAudio, ffmpeg, and the X/xkb
-libraries Qt's platform plugin needs) and the desktop entry:
+Then install the system dependencies (PortAudio, ffmpeg, and the X/xkb libraries Qt's platform plugin needs) and the desktop entry:
 
 ```bash
 cd qt-app
 ./setup.sh
 ```
 
-Unlike the old GTK version there is no `--system-site-packages` venv to create:
-PyQt6 comes from PyPI, whereas PyGObject had to come from the distro. `run.sh`
-lets uv build and refresh the environment on every launch.
+Unlike the old GTK version there is no `--system-site-packages` venv to create: PyQt6 comes from PyPI, whereas PyGObject had to come from the distro. `run.sh` lets uv build and refresh the environment on every launch.
 
 #### The `windowchrome` checkout
 
-The colored title bar comes from
-**[windowchrome](https://github.com/Clay-Ferguson/windowchrome)**, a small
-reusable PyQt6 library kept in its own repository so several apps can wear the
-same chrome. It is **not on PyPI**: `pyproject.toml` resolves it by path.
+The colored title bar comes from **[windowchrome](https://github.com/Clay-Ferguson/windowchrome)**, a small reusable PyQt6 library kept in its own repository so several apps can wear the same chrome. It is **not on PyPI**: `pyproject.toml` resolves it by path.
 
-Note the path is `../../windowchrome` — **two** levels up, not one. This app
-lives a directory deeper than the others that use it, so the checkout belongs
-beside `lingo2`, not beside `qt-app`:
+Note the path is `../../windowchrome` — **two** levels up, not one. This app lives a directory deeper than the others that use it, so the checkout belongs beside `lingo2`, not beside `qt-app`:
 
 ```bash
 cd ../..                   # the directory holding lingo2/
@@ -87,10 +78,7 @@ projects/
 └── windowchrome/          <- must sit beside lingo2, not beside qt-app
 ```
 
-If it is missing, `./run.sh` fails immediately with an unresolved path
-dependency rather than with anything subtle. The checkout is used in place —
-`uv` installs it editable, so there is nothing to build and an edit there is
-live here on the next run.
+If it is missing, `./run.sh` fails immediately with an unresolved path dependency rather than with anything subtle. The checkout is used in place — `uv` installs it editable, so there is nothing to build and an edit there is live here on the next run.
 
 ### Running
 
@@ -114,8 +102,7 @@ This updates `pyproject.toml` and `uv.lock`.
 
 ## Code Layout
 
-The Qt-free logic is deliberately kept separate from the GUI, so the parts
-that are tied to Linux are also the parts that are easiest to test headlessly:
+The Qt-free logic is deliberately kept separate from the GUI, so the parts that are tied to Linux are also the parts that are easiest to test headlessly:
 
 | Module | Responsibility | Qt? |
 |--------|----------------|-----|

@@ -5,9 +5,7 @@ Lingo 2.0 provides **local speech-to-text** via whisper.cpp with two active apps
 1. **web-app/** - Browser-based TTS/STT with FastAPI backend (port 8009)
 2. **qt-app/** - System-wide voice typing for Linux (types into any focused app)
 
-**gtk-app/** is the original GTK4 version of the desktop app, kept as a
-**deprecated** project for anyone who needs a GTK build. It is frozen: make
-changes in `qt-app/` instead, and do not port fixes back unless asked.
+**gtk-app/** is the original GTK4 version of the desktop app, kept as a **deprecated** project for anyone who needs a GTK build. It is frozen: make changes in `qt-app/` instead, and do not port fixes back unless asked.
 
 **Philosophy**: Framework-free. No React/Vue/build systems. Vanilla HTML/CSS/JS + Python.
 
@@ -61,85 +59,27 @@ cd qt-app && ./run.sh   # Launch floating mic button
 - **Keyboard injection**: XDG Remote Desktop Portal over **QtDBus** (Wayland-safe)
 - **Logging**: Writes to `qt-app/voice_typer.log` (overwritten each run)
 - **Config file**: `~/.config/lingo-gtk.yaml` stores user preferences (microphone selection)
-- **Device selection**: dropdown in the Settings dialog lets user pick microphone;
-  saved to config file
-- **UI shape**: the main window is one row -- mic checkbox and a gear -- and
-  never changes size. Settings open in a separate modeless dialog
-  (`settings_dialog.py`). There is no in-window close button; the title bar's
-  is the same size and a few pixels away
-- **Window chrome**: the colored title bar comes from `windowchrome`, a library
-  of ours in its own repository -- see the entry under "Deliberate non-obvious
-  choices" below, and read `windowchrome/README.md` before touching any of it
-- **Thread bridge**: the PortAudio callback and whisper worker threads reach the
-  UI through `pyqtSignal`, never by touching widgets directly
+- **Device selection**: dropdown in the Settings dialog lets user pick microphone; saved to config file
+- **UI shape**: the main window is one row -- mic checkbox and a gear -- and never changes size. Settings open in a separate modeless dialog (`settings_dialog.py`). There is no in-window close button; the title bar's is the same size and a few pixels away
+- **Window chrome**: the colored title bar comes from `windowchrome`, a library of ours in its own repository -- see the entry under "Deliberate non-obvious choices" below, and read `windowchrome/README.md` before touching any of it
+- **Thread bridge**: the PortAudio callback and whisper worker threads reach the UI through `pyqtSignal`, never by touching widgets directly
 
 #### Deliberate non-obvious choices - do not "fix" these
 
-- **The config file is still named `lingo-gtk.yaml`.** Renaming it would orphan
-  the saved `portal_restore_token` and force users through the Remote Desktop
-  permission dialog again.
-- **`_send_key` blocks on `bus.call()` instead of using fire-and-forget
-  `bus.send()`.** The round-trip is load-bearing back-pressure: without it, key
-  events outrun the compositor and arrive scrambled and truncated.
-- **uint32 D-Bus arguments must be `QDBusArgument(v, QMetaType.Type.UInt)`.** A
-  plain Python int marshals as int32 and the portal rejects the message. Since
-  key events are sent without checking a reply, getting this wrong fails silently.
-- **`a{sv}` options are plain Python dicts.** Wrapping the values in
-  `QDBusVariant` crashes xdg-desktop-portal outright.
-- **The RMS silence-detection state machine in `audio.py` is tuned**, not
-  arbitrary. Changing the constants or the branch structure causes missed or
-  spurious utterances.
-- **`_enforce_size()` re-`resize()`s the window from `resizeEvent`.** Mutter
-  replays a stale size in the configure that comes with focus changes, and Qt
-  applies it instead of clamping to the window's min/max, which used to collapse
-  the Settings panel and make the widgets overlap. `setFixedSize()` cannot undo
-  it -- it returns early when the min and max are already correct, which they
-  are. Settings is now a separate dialog and the main window never resizes
-  itself, so this should never fire; it is kept as a belt and logs when it
-  corrects.
-- **The main window must never resize itself.** That is why Settings lives in
-  `settings_dialog.py` rather than an expanding panel: a self-resizing,
-  non-resizable Wayland toplevel is the rare path that produced the bug above.
-  The dialog is deliberately *not* fixed-size, so it does not take that path.
-- **The settings dialog never touches the config file or the recorder.** It
-  validates input and emits signals; `window.py` applies them. Two of the three
-  settings have live side effects (the threshold reaches a running recorder, a
-  device change stops the mic), and the window is the only thing that owns both.
-- **The icon buttons are painted white once, at construction, and never
-  change.** An icon is a pixmap and does not follow the stylesheet's `color`
-  rule, so it has to be painted by hand -- but one fixed color is all this
-  window needs, so it does not track the phase. Only the `-symbolic` theme
-  icons are painted; the full-color fallbacks silhouette into a blob, so they
-  are used as they ship.
-- **`on_processing_phase_changed` repolishes the mic checkbox as well as the
-  window.** A repolish reaches exactly one widget, and the rule that flips the
-  checkbox text black for the white phase lives on the checkbox.
-- **`sounddevice` is imported lazily**, so a missing PortAudio produces the
-  friendly dependency message instead of an import traceback.
-- **The window chrome is `windowchrome`'s, not ours.** The colored title bar is
-  a separate library; `[tool.uv.sources]` in `qt-app/pyproject.toml` resolves it
-  at `../../windowchrome` -- **two** levels up, unlike every other app that uses
-  it, because `qt-app` sits a directory deeper than they do. It has to be there
-  or `uv run` fails with an unresolved path dependency.
-  `windowchrome/README.md` carries the measurements behind it. The integration
-  is three calls and touches no layout: `configure(LINGO_THEME)` before
-  `QApplication` and `install(app)` after it, both in `__main__` and both
-  order-sensitive, plus the one below.
-- **`build_dialog_stylesheet()` derives its muted color from
-  `windowchrome.body_text_color()`, not from `QApplication.palette()`.**
-  `WindowText` is one of the three roles the title bar takes over, so the
-  application palette hands back the title bar's white and the help paragraphs
-  come out invisible on a light theme. Verified: after the repurposing the app
-  palette reports `WindowText = #ffffff` where `body_text_color()` returns
-  `#000000`. Nothing else in the app reads `Window` or `WindowText`; keep it
-  that way.
-- **`windowchrome` paints nothing inside the window, deliberately.** It briefly
-  had a `bordered_body()` that painted a thicker frame just inside the window
-  edge, and this app was the worst fit for it: `bordered_body()` renamed the
-  widget it was given, so `QWidget#voiceTyperWindow[phase="..."]` had to move to
-  a wrapper widget and the window went three deep. That was reverted -- the
-  window is a plain toplevel again, the phase colors are on it, and
-  `SetFixedSize` is back on its own layout. Do not reintroduce it.
+- **The config file is still named `lingo-gtk.yaml`.** Renaming it would orphan the saved `portal_restore_token` and force users through the Remote Desktop permission dialog again.
+- **`_send_key` blocks on `bus.call()` instead of using fire-and-forget `bus.send()`.** The round-trip is load-bearing back-pressure: without it, key events outrun the compositor and arrive scrambled and truncated.
+- **uint32 D-Bus arguments must be `QDBusArgument(v, QMetaType.Type.UInt)`.** A plain Python int marshals as int32 and the portal rejects the message. Since key events are sent without checking a reply, getting this wrong fails silently.
+- **`a{sv}` options are plain Python dicts.** Wrapping the values in `QDBusVariant` crashes xdg-desktop-portal outright.
+- **The RMS silence-detection state machine in `audio.py` is tuned**, not arbitrary. Changing the constants or the branch structure causes missed or spurious utterances.
+- **`_enforce_size()` re-`resize()`s the window from `resizeEvent`.** Mutter replays a stale size in the configure that comes with focus changes, and Qt applies it instead of clamping to the window's min/max, which used to collapse the Settings panel and make the widgets overlap. `setFixedSize()` cannot undo it -- it returns early when the min and max are already correct, which they are. Settings is now a separate dialog and the main window never resizes itself, so this should never fire; it is kept as a belt and logs when it corrects.
+- **The main window must never resize itself.** That is why Settings lives in `settings_dialog.py` rather than an expanding panel: a self-resizing, non-resizable Wayland toplevel is the rare path that produced the bug above. The dialog is deliberately *not* fixed-size, so it does not take that path.
+- **The settings dialog never touches the config file or the recorder.** It validates input and emits signals; `window.py` applies them. Two of the three settings have live side effects (the threshold reaches a running recorder, a device change stops the mic), and the window is the only thing that owns both.
+- **The icon buttons are painted white once, at construction, and never change.** An icon is a pixmap and does not follow the stylesheet's `color` rule, so it has to be painted by hand -- but one fixed color is all this window needs, so it does not track the phase. Only the `-symbolic` theme icons are painted; the full-color fallbacks silhouette into a blob, so they are used as they ship.
+- **`on_processing_phase_changed` repolishes the mic checkbox as well as the window.** A repolish reaches exactly one widget, and the rule that flips the checkbox text black for the white phase lives on the checkbox.
+- **`sounddevice` is imported lazily**, so a missing PortAudio produces the friendly dependency message instead of an import traceback.
+- **The window chrome is `windowchrome`'s, not ours.** The colored title bar is a separate library; `[tool.uv.sources]` in `qt-app/pyproject.toml` resolves it at `../../windowchrome` -- **two** levels up, unlike every other app that uses it, because `qt-app` sits a directory deeper than they do. It has to be there or `uv run` fails with an unresolved path dependency. `windowchrome/README.md` carries the measurements behind it. The integration is three calls and touches no layout: `configure(LINGO_THEME)` before `QApplication` and `install(app)` after it, both in `__main__` and both order-sensitive, plus the one below.
+- **`build_dialog_stylesheet()` derives its muted color from `windowchrome.body_text_color()`, not from `QApplication.palette()`.** `WindowText` is one of the three roles the title bar takes over, so the application palette hands back the title bar's white and the help paragraphs come out invisible on a light theme. Verified: after the repurposing the app palette reports `WindowText = #ffffff` where `body_text_color()` returns `#000000`. Nothing else in the app reads `Window` or `WindowText`; keep it that way.
+- **`windowchrome` paints nothing inside the window, deliberately.** It briefly had a `bordered_body()` that painted a thicker frame just inside the window edge, and this app was the worst fit for it: `bordered_body()` renamed the widget it was given, so `QWidget#voiceTyperWindow[phase="..."]` had to move to a wrapper widget and the window went three deep. That was reverted -- the window is a plain toplevel again, the phase colors are on it, and `SetFixedSize` is back on its own layout. Do not reintroduce it.
 
 ## Silence Detection Config
 
@@ -180,10 +120,7 @@ if ((evt.ctrlKey || evt.metaKey) && evt.key.toLowerCase() === "x") {
 
 **qt-app** (run `./setup.sh` or manually install):
 - System: `portaudio19-dev`, `ffmpeg`, `libxcb-cursor0`, `libxkbcommon-x11-0` (Ubuntu/Debian names)
-- Python (via pyproject.toml/uv): `PyQt6`, `sounddevice`, `numpy`, `PyYAML`,
-  and `windowchrome` -- the last of which is **not on PyPI**: it is resolved by
-  path from `../../windowchrome`, a checkout that must sit beside the `lingo2`
-  directory (not beside `qt-app`)
+- Python (via pyproject.toml/uv): `PyQt6`, `sounddevice`, `numpy`, `PyYAML`, and `windowchrome` -- the last of which is **not on PyPI**: it is resolved by path from `../../windowchrome`, a checkout that must sit beside the `lingo2` directory (not beside `qt-app`)
 - Keyboard injection: XDG Remote Desktop Portal via QtDBus (part of PyQt6; no PyGObject)
 
 ## Note to AI Agents

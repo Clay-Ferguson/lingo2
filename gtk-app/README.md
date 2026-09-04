@@ -53,9 +53,7 @@ cd gtk-app
 ./setup.sh
 ```
 
-`setup.sh` installs OS-level packages (sudo required) and creates a `.venv`
-with `--system-site-packages` so the system PyGObject/GTK4 bindings are
-visible to the project.
+`setup.sh` installs OS-level packages (sudo required) and creates a `.venv` with `--system-site-packages` so the system PyGObject/GTK4 bindings are visible to the project.
 
 ### Running
 
@@ -76,8 +74,7 @@ uv run --active voice_typer.py
 uv add <package>
 ```
 
-This updates `pyproject.toml` and `uv.lock`. Run `uv sync --active` to
-install on machines that already have a `.venv`.
+This updates `pyproject.toml` and `uv.lock`. Run `uv sync --active` to install on machines that already have a `.venv`.
 
 ## Troubleshooting & Tips
 
