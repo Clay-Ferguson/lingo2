@@ -23,6 +23,7 @@ from PyQt6.QtGui import QColor, QIcon, QPainter, QPixmap
 from PyQt6.QtWidgets import (QApplication, QCheckBox, QHBoxLayout, QLayout,
                              QMessageBox, QSizePolicy, QSpacerItem, QStyle,
                              QToolButton, QVBoxLayout, QWidget)
+from windowchrome import apply_checkboxes
 
 from . import APP_NAME, UI_FONT_PX
 from .audio import AudioRecorder
@@ -44,9 +45,10 @@ PHASE_COLORS = {
     "typing": "#FFFFFF",
 }
 
-# The checkbox indicator is 24px and its label runs at UI_FONT_PX, because
-# this window is glanced at rather than read. The icons are sized to sit at
-# the same visual weight rather than looking like afterthoughts next to it.
+# The checkbox label runs at UI_FONT_PX and its indicator is enlarged by
+# `windowchrome.apply_checkboxes()` (see _build_top_row), because this window
+# is glanced at rather than read. The icons are sized to sit at the same
+# visual weight rather than looking like afterthoughts next to it.
 ICON_PX = 22
 MIN_WINDOW_WIDTH = 200
 ICON_BUTTON_PX = 32
@@ -66,11 +68,26 @@ def build_stylesheet() -> str:
     would reach into the settings dialog and, during the white phase, black
     out its text against its own dark background. The settings dialog has no
     QCheckBox and no #iconButton, so nothing below can escape into it.
+
+    The indicator's *size* is deliberately not here. It was a
+    `QCheckBox::indicator` rule and is now `windowchrome.apply_checkboxes()`,
+    shared with the other apps -- see `windowchrome/README.md` §12, which is
+    also where the reason it is a style and not a stylesheet lives. What
+    remains this sheet's business is the font and the checked weight.
+
+    Checking the mic deliberately does *not* recolor the label. It used to go
+    red (`color: #e53935`), which fought the window's own phase colors -- the
+    background is already saying what the pipeline is doing, in three colors
+    chosen for that job, and a fourth color on the text competed with it. So
+    the label keeps the theme's foreground in every state, which is white on
+    a dark desktop and black on a light one. Do not pin it to a hex value:
+    the 'typing' phase paints the window white, and a hard-coded white label
+    would vanish into it -- which is exactly what the rule below exists to
+    prevent.
     """
     rules = [
         f"QCheckBox {{ font-size: {UI_FONT_PX}px; }}",
-        "QCheckBox::indicator { width: 24px; height: 24px; }",
-        "QCheckBox:checked { color: #e53935; font-weight: bold; }",
+        "QCheckBox:checked { font-weight: bold; }",
         f"QToolButton#iconButton {{ min-width: {ICON_BUTTON_PX}px;"
         f" min-height: {ICON_BUTTON_PX}px; border-radius: 4px; }}",
     ]
@@ -227,6 +244,10 @@ class VoiceTyperWindow(QWidget):
         row.setSpacing(4)
 
         self.mic_checkbox = QCheckBox("Mic")
+        # The enlarged indicator is windowchrome's, shared with the other
+        # apps. It has to be applied to the widget rather than written into
+        # build_stylesheet(); §12 of that README says why.
+        apply_checkboxes(self.mic_checkbox)
         self.mic_checkbox.toggled.connect(self.on_mic_toggled)
         row.addWidget(self.mic_checkbox)
 
