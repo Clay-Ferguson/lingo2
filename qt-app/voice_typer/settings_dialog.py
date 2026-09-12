@@ -20,9 +20,9 @@ import logging
 from typing import Any
 
 from PyQt6.QtCore import pyqtSignal
-from PyQt6.QtWidgets import (QComboBox, QDialog, QHBoxLayout, QLabel,
-                             QLineEdit, QVBoxLayout, QWidget)
-from windowchrome import body_text_color
+from PyQt6.QtGui import QPalette
+from PyQt6.QtWidgets import (QApplication, QComboBox, QDialog, QHBoxLayout,
+                             QLabel, QLineEdit, QVBoxLayout, QWidget)
 
 log = logging.getLogger(__name__)
 
@@ -56,13 +56,10 @@ def build_dialog_stylesheet() -> str:
     "typing" phase, which forces child text to black, would black out this
     dialog's text on its own dark background every time you dictate a word.
 
-    The muted color comes from `windowchrome.body_text_color()` and *not* from
-    `QApplication.palette()`: `WindowText` is one of the three roles the title
-    bar takes over, so reading it from the application palette hands back the
-    title bar's white and the help paragraphs come out invisible on a light
-    theme. Same rule, same reason, as `body_window_color()`.
+    The muted color is the theme's own window text color, faded, so the help
+    paragraphs stay readable on both light and dark desktops.
     """
-    muted = body_text_color()
+    muted = QApplication.palette().color(QPalette.ColorRole.WindowText)
     muted.setAlpha(180)
     return (
         f"QLabel#helpText {{ font-size: 14px; color: rgba({muted.red()},"

@@ -11,7 +11,7 @@ dependencies = [
     "windowchrome",
 ]
 
-# `windowchrome` is our own library — the colored title bar — and it is not on
+# `windowchrome` is our own library of shared widget styling and it is not on
 # PyPI: it is resolved by path from a checkout of its own. Note
 # the *two* levels up: unlike the other apps that use it, this one lives a
 # directory deeper (`lingo2/qt-app/`), so windowchrome is a sibling of `lingo2`

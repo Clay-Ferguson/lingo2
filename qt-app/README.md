@@ -60,7 +60,7 @@ Unlike the old GTK version there is no `--system-site-packages` venv to create: 
 
 #### The `windowchrome` checkout
 
-The colored title bar comes from **[windowchrome](https://github.com/Clay-Ferguson/windowchrome)**, a small reusable PyQt6 library kept in its own repository so several apps can wear the same chrome. It is **not on PyPI**: `pyproject.toml` resolves it by path.
+The mic check box's enlarged indicator comes from **[windowchrome](https://github.com/Clay-Ferguson/windowchrome)**, a small reusable PyQt6 library kept in its own repository so several apps can share the same look. It is **not on PyPI**: `pyproject.toml` resolves it by path.
 
 Note the path is `../../windowchrome` — **two** levels up, not one. This app lives a directory deeper than the others that use it, so the checkout belongs beside `lingo2`, not beside `qt-app`:
 
