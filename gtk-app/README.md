@@ -8,7 +8,6 @@
 
 [![Python](https://img.shields.io/badge/Python-3.x-blue?logo=python&logoColor=white)](voice_typer.py)
 [![GTK4](https://img.shields.io/badge/GTK-4.0-green?logo=gnome&logoColor=white)](voice_typer.py)
-[![Framework Free](https://img.shields.io/badge/Framework_Free-orange)](voice_typer.py)
 [![Whisper.cpp](https://img.shields.io/badge/Whisper.cpp-Local_STT-purple)](../whisper-model/whisper.cpp/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](../LICENSE.md)
 
